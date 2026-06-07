@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Level
 // @namespace    NilsPe.autobuy.level.api
-// @version      2.4.0
+// @version      2.4.1
 // @description  Autobuy Level mit zentraler NilsPe-Skriptbasis und Fortschrittsbalken
 // @author       NilsPe
 // @license      MIT
@@ -13,7 +13,7 @@
 // @match        https://*.leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.0
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -444,11 +444,28 @@
     sessionStorage.setItem(RUN_FLAG, 'true');
 
     createNavbar();
-    setState('Lade Gebäude über API-Speicher…', 'info');
-    updateProgress(0, 0, 1);
+    setState('Lade Gebäude über API-Speicher...', 'info');
 
     const { delayB, delayF } = await getConfiguredDelays();
-    const list = await getBuildingsOfLeitstelle(leitstellenId, delayF);
+    const loadingStartedAt = Date.now();
+    const loadingStatusTimer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - loadingStartedAt) / 1_000);
+      setState(`Lade Gebäude über API-Speicher... ${seconds}s`, 'info');
+    }, 1_000);
+    let list;
+
+    try {
+      list = await getBuildingsOfLeitstelle(leitstellenId, delayF);
+    } catch (error) {
+      console.error('[Autobuy Level] Gebäude konnten nicht geladen werden:', error);
+      setState(`Ladefehler: ${error.message ?? error}`, 'danger');
+      sessionStorage.removeItem(RUN_FLAG);
+      return;
+    } finally {
+      clearInterval(loadingStatusTimer);
+    }
+
+    console.log('[Autobuy Level] Verwendbare Gebäude geladen:', list.length);
     const configured = list.filter(building => building.target > 0);
 
     const targets = configured
