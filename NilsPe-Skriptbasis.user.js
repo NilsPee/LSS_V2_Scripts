@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.0
+// @version      1.0.1
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -795,21 +795,26 @@ async function optionListFor(selectType) {
 async function addSelectInput(body, option, index) {
   const container = document.createElement('div');
   container.className = 'select-container';
+  const group = document.createElement('div');
+  group.className = 'form-group';
+  const column = document.createElement('div');
+  column.className = 'col-sm-6';
   const id = settingInputId(option, index);
   const label = document.createElement('label');
   label.htmlFor = id;
   label.textContent = option.label;
   const select = document.createElement('select');
   select.id = id;
-  select.className = 'selectpicker select form-control';
+  select.className = 'form-control';
   select.multiple = option.multiple ?? false;
   select.title = option.title ?? '';
-  select.dataset.liveSearch = 'true';
-  select.dataset.actionsBox = 'true';
-  select.dataset.container = 'body';
 
   const options = option.options ?? await optionListFor(option.selectType);
   const stored = parseStoredJson(await GM.getValue(option.key, '[]'), []);
+
+  if (select.multiple) {
+    select.size = Math.min(Math.max(options.length, 4), 10);
+  }
 
   for (const item of options) {
     const element = document.createElement('option');
@@ -827,14 +832,11 @@ async function addSelectInput(body, option, index) {
     GM.setValue(option.key, JSON.stringify(values));
   });
 
-  container.append(label, select);
-  addInfoText(container, option.info);
+  column.append(label, select);
+  addInfoText(column, option.info);
+  group.append(column);
+  container.append(group);
   body.append(container);
-
-  if (typeof globalThis.$ === 'function' &&
-      typeof globalThis.$(select).selectpicker === 'function') {
-    globalThis.$(select).selectpicker();
-  }
 }
 
 async function addOptions(configuration) {
