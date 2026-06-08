@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.4
+// @version      1.0.5
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -21,7 +21,7 @@
 const NILSPE_DB_NAME = 'nilspe-lss-cache';
 const NILSPE_DB_VERSION = 1;
 const NILSPE_PAGE_SIZE = 3_000;
-const NILSPE_VEHICLE_PAGE_SIZE = 1_000;
+const NILSPE_VEHICLE_PAGE_SIZE = 5_000;
 const NILSPE_FULL_SYNC_AGE = 24 * 60 * 60 * 1_000;
 
 const NILSPE_STORES = {
