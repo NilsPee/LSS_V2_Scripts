@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.2
+// @version      1.0.4
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -21,6 +21,7 @@
 const NILSPE_DB_NAME = 'nilspe-lss-cache';
 const NILSPE_DB_VERSION = 1;
 const NILSPE_PAGE_SIZE = 3_000;
+const NILSPE_VEHICLE_PAGE_SIZE = 1_000;
 const NILSPE_FULL_SYNC_AGE = 24 * 60 * 60 * 1_000;
 
 const NILSPE_STORES = {
@@ -314,7 +315,13 @@ function mergePages(pages) {
   return Object.assign({}, ...pages.filter(page => page && typeof page === 'object'));
 }
 
-async function synchronizeV2(db, storeName, endpoint, maxAgeSeconds = 300) {
+async function synchronizeV2(
+  db,
+  storeName,
+  endpoint,
+  maxAgeSeconds = 300,
+  pageSize = NILSPE_PAGE_SIZE
+) {
   const lockName = `nilspe-sync:${storeName}`;
   const sync = async () => {
     const state = await readSyncState(db, storeName);
@@ -325,25 +332,42 @@ async function synchronizeV2(db, storeName, endpoint, maxAgeSeconds = 300) {
     }
 
     const fullSync = !state?.fullSyncAt || now - state.fullSyncAt >= NILSPE_FULL_SYNC_AGE;
-    const query = { limit: NILSPE_PAGE_SIZE };
+    const query = { limit: pageSize };
     const syncStartedAt = new Date(now - 1_000).toISOString();
 
     if (!fullSync && state.changedSince) {
       query.from = state.changedSince;
     }
 
-    const pages = await fetchAllPages(endpoint, query);
+    let nextUrl = withQuery(endpoint, query);
+    const visited = new Set();
+    let page = 0;
 
-    if (!pages) {
-      return false;
-    }
+    while (nextUrl) {
+      if (visited.has(nextUrl)) {
+        throw new Error(`Pagination loop detected for ${nextUrl}`);
+      }
 
-    const records = mergePages(pages);
+      visited.add(nextUrl);
+      const response = await fetchJson(nextUrl);
 
-    if (fullSync) {
-      await replaceRecords(db, storeName, records);
-    } else {
-      await putRecords(db, storeName, records);
+      if (!response) {
+        return false;
+      }
+
+      const records = extractResult(response);
+
+      if (fullSync && page === 0) {
+        await replaceRecords(db, storeName, records);
+      } else {
+        await putRecords(db, storeName, records);
+      }
+
+      page++;
+      console.debug(
+        `[NilsPe LSS Core] ${storeName}: Seite ${page} gespeichert`
+      );
+      nextUrl = response.paging?.next_page ?? null;
     }
 
     await writeSyncState(db, storeName, {
@@ -404,7 +428,13 @@ function updateAllianceBuildings(db, maxAge = 300) {
 }
 
 function updateVehicles(db, maxAge = 300) {
-  return synchronizeV2(db, 'vehicles', '/api/v2/vehicles', maxAge);
+  return synchronizeV2(
+    db,
+    'vehicles',
+    '/api/v2/vehicles',
+    maxAge,
+    NILSPE_VEHICLE_PAGE_SIZE
+  );
 }
 
 function updateVehiclesV2(db, maxAge = 300) {
@@ -820,6 +850,7 @@ async function addSelectInput(body, option, index) {
     element.value = String(item.value);
     element.dataset.value = JSON.stringify(item.value);
     element.textContent = item.name;
+    element.disabled = item.disabled ?? false;
     element.selected = stored.some(value => String(value) === String(item.value));
     select.append(element);
   }
