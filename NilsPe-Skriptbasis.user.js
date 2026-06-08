@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.1
+// @version      1.0.2
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -12,6 +12,7 @@
 // @match        https://*.leitstellenspiel.de/*
 // @grant        GM.getValue
 // @grant        GM.setValue
+// @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
 
@@ -794,7 +795,6 @@ async function optionListFor(selectType) {
 
 async function addSelectInput(body, option, index) {
   const container = document.createElement('div');
-  container.className = 'select-container';
   const group = document.createElement('div');
   group.className = 'form-group';
   const column = document.createElement('div');
@@ -805,16 +805,15 @@ async function addSelectInput(body, option, index) {
   label.textContent = option.label;
   const select = document.createElement('select');
   select.id = id;
-  select.className = 'form-control';
+  select.className = 'selectpicker select form-control';
   select.multiple = option.multiple ?? false;
   select.title = option.title ?? '';
+  select.dataset.liveSearch = 'true';
+  select.dataset.actionsBox = 'true';
+  select.dataset.container = 'body';
 
   const options = option.options ?? await optionListFor(option.selectType);
   const stored = parseStoredJson(await GM.getValue(option.key, '[]'), []);
-
-  if (select.multiple) {
-    select.size = Math.min(Math.max(options.length, 4), 10);
-  }
 
   for (const item of options) {
     const element = document.createElement('option');
@@ -837,6 +836,24 @@ async function addSelectInput(body, option, index) {
   group.append(column);
   container.append(group);
   body.append(container);
+
+  const pageJQuery = typeof unsafeWindow !== 'undefined'
+    ? unsafeWindow.$
+    : globalThis.$;
+  const picker = typeof pageJQuery === 'function'
+    ? pageJQuery(select)
+    : null;
+
+  if (picker && typeof picker.selectpicker === 'function') {
+    container.className = 'select-container';
+    picker.selectpicker();
+  } else {
+    select.className = 'form-control';
+
+    if (select.multiple) {
+      select.size = Math.min(Math.max(options.length, 4), 10);
+    }
+  }
 }
 
 async function addOptions(configuration) {
