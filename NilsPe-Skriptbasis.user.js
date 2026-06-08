@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.5
+// @version      1.0.7
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -273,10 +273,56 @@ async function fetchJson(endpoint, attempts = 3) {
   return null;
 }
 
+async function fetchJsonPage(endpoint, attempts = 2) {
+  let lastError;
+  let status = 0;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(endpoint, {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      });
+      status = response.status;
+
+      if (response.ok) {
+        return { data: await response.json(), status };
+      }
+
+      lastError = new Error(`HTTP ${response.status} for ${endpoint}`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < attempts) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 1_500));
+    }
+  }
+
+  console.warn('[NilsPe LSS Core] API page failed:', lastError);
+  return { data: null, status };
+}
+
+function setPageLimit(endpoint, limit) {
+  const url = new URL(endpoint, location.origin);
+  url.searchParams.set('limit', String(limit));
+  return url.href;
+}
+
 function extractResult(response) {
   return response && Object.hasOwn(response, 'result')
     ? response.result
     : response;
+}
+
+function payloadRecordCount(payload) {
+  if (Array.isArray(payload)) {
+    return payload.length;
+  }
+
+  return payload && typeof payload === 'object'
+    ? Object.keys(payload).length
+    : 0;
 }
 
 async function fetchAllPages(endpoint, parameters = {}) {
@@ -327,35 +373,70 @@ async function synchronizeV2(
     const state = await readSyncState(db, storeName);
     const now = Date.now();
 
-    if (state && maxAgeSeconds > 0 && now - state.checkedAt < maxAgeSeconds * 1_000) {
+    if (state && !state.inProgress && maxAgeSeconds > 0 &&
+        now - state.checkedAt < maxAgeSeconds * 1_000) {
       return false;
     }
 
-    const fullSync = !state?.fullSyncAt || now - state.fullSyncAt >= NILSPE_FULL_SYNC_AGE;
+    const resuming = Boolean(state?.inProgress && state.resumeUrl);
+    const fullSync = resuming
+      ? Boolean(state.syncWasFullSync)
+      : !state?.fullSyncAt || now - state.fullSyncAt >= NILSPE_FULL_SYNC_AGE;
     const query = { limit: pageSize };
-    const syncStartedAt = new Date(now - 1_000).toISOString();
+    const syncStartedAt = state?.syncStartedAt ??
+      new Date(now - 1_000).toISOString();
 
-    if (!fullSync && state.changedSince) {
+    if (!fullSync && state?.changedSince) {
       query.from = state.changedSince;
     }
 
-    let nextUrl = withQuery(endpoint, query);
+    let activePageSize = state?.pageSize ?? pageSize;
+    let nextUrl = resuming
+      ? setPageLimit(state.resumeUrl, activePageSize)
+      : withQuery(endpoint, { ...query, limit: activePageSize });
     const visited = new Set();
-    let page = 0;
+    let page = state?.page ?? 0;
+    let recordCount = state?.recordCount ?? 0;
 
     while (nextUrl) {
       if (visited.has(nextUrl)) {
         throw new Error(`Pagination loop detected for ${nextUrl}`);
       }
 
-      visited.add(nextUrl);
-      const response = await fetchJson(nextUrl);
+      const pageResponse = await fetchJsonPage(nextUrl);
 
-      if (!response) {
-        return false;
+      if (!pageResponse.data) {
+        if (storeName === 'vehicles' && activePageSize > 1_000) {
+          activePageSize = activePageSize > 2_500 ? 2_500 : 1_000;
+          nextUrl = setPageLimit(nextUrl, activePageSize);
+          console.info(
+            `[NilsPe LSS Core] vehicles: HTTP ${pageResponse.status || 'Fehler'}, ` +
+            `wiederhole Cursor mit limit=${activePageSize}`
+          );
+          globalThis.dispatchEvent(new CustomEvent('nilspe-sync-progress', {
+            detail: {
+              storeName,
+              page,
+              recordCount,
+              fullSync,
+              pageSize: activePageSize,
+              retrying: true
+            }
+          }));
+          await new Promise(resolve => setTimeout(resolve, 3_000));
+          continue;
+        }
+
+        throw new Error(
+          `${storeName}: API-Seite konnte nicht geladen werden ` +
+          `(HTTP ${pageResponse.status || 'unbekannt'}).`
+        );
       }
 
+      visited.add(nextUrl);
+      const response = pageResponse.data;
       const records = extractResult(response);
+      recordCount += payloadRecordCount(records);
 
       if (fullSync && page === 0) {
         await replaceRecords(db, storeName, records);
@@ -364,16 +445,48 @@ async function synchronizeV2(
       }
 
       page++;
-      console.debug(
-        `[NilsPe LSS Core] ${storeName}: Seite ${page} gespeichert`
+      const progress = {
+        storeName,
+        page,
+        recordCount,
+        fullSync,
+        pageSize: activePageSize
+      };
+      console.info(
+        `[NilsPe LSS Core] ${storeName}: Seite ${page}, ` +
+        `${recordCount.toLocaleString('de-DE')} Datensaetze gespeichert`
       );
-      nextUrl = response.paging?.next_page ?? null;
+      globalThis.dispatchEvent(new CustomEvent('nilspe-sync-progress', {
+        detail: progress
+      }));
+      const responseNextUrl = response.paging?.next_page ?? null;
+      nextUrl = responseNextUrl
+        ? setPageLimit(responseNextUrl, activePageSize)
+        : null;
+
+      if (nextUrl) {
+        await writeSyncState(db, storeName, {
+          inProgress: true,
+          resumeUrl: nextUrl,
+          page,
+          recordCount,
+          pageSize: activePageSize,
+          syncStartedAt,
+          syncWasFullSync: fullSync,
+          checkedAt: 0,
+          changedSince: state?.changedSince ?? null,
+          fullSyncAt: state?.fullSyncAt ?? null
+        });
+      }
     }
 
     await writeSyncState(db, storeName, {
+      inProgress: false,
+      resumeUrl: null,
       checkedAt: Date.now(),
       changedSince: syncStartedAt,
-      fullSyncAt: fullSync ? Date.now() : state.fullSyncAt
+      fullSyncAt: fullSync ? Date.now() : state.fullSyncAt,
+      pageSize: activePageSize
     });
     return true;
   };
