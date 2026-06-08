@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Vehicles
 // @namespace    NilsPe.autobuy.vehicles
-// @version      1.1.7
+// @version      1.2.1
 // @description  Kauft konfigurierte Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -161,8 +161,7 @@
 
   async function openCurrentDb() {
     if (typeof openDb !== 'function' ||
-        typeof updateBuildings !== 'function' ||
-        typeof updateVehicles !== 'function') {
+        typeof updateBuildings !== 'function') {
       throw new Error('NilsPe-Skriptbasis wurde nicht geladen.');
     }
 
@@ -396,92 +395,98 @@
       .sort((a, b) => a.id - b.id);
   }
 
-  async function vehicleCountsByBuilding(buildingIds) {
-    const db = await openCurrentDb();
-    const syncStartedAt = Date.now();
-    const onSyncProgress = event => {
-      const progress = event.detail;
+  function rowVehicleType(row) {
+    const element = row.querySelector(
+      '[vehicle_type_id], [data-vehicle-type-id]'
+    );
+    return Number(
+      element?.getAttribute('vehicle_type_id') ??
+      element?.getAttribute('data-vehicle-type-id')
+    );
+  }
 
-      if (progress?.storeName === 'vehicles') {
-        const elapsedSeconds = Math.floor(
-          (Date.now() - syncStartedAt) / 1_000
-        );
-        const action = progress.retrying
-          ? `Server ausgelastet: neuer Versuch mit limit=${progress.pageSize} ` +
-            `(${progress.recordCount.toLocaleString('de-DE')} gespeichert)`
-          : `Fahrzeuge: ${progress.recordCount.toLocaleString('de-DE')} geladen, ` +
-            `Seite ${progress.page}, limit=${progress.pageSize}, ${elapsedSeconds}s`;
-        setProgress(action);
-      }
-    };
-    globalThis.addEventListener('nilspe-sync-progress', onSyncProgress);
+  function rowBuildingId(row) {
+    const attributeId = Number(
+      row.getAttribute('building_id') ??
+      row.getAttribute('data-building_id') ??
+      row.getAttribute('data-building-id')
+    );
 
-    try {
-      setProgress('Fahrzeugbestand wird synchronisiert...');
-      await updateVehicles(db, 60);
-      const syncState = await getSyncState(db, 'vehicles');
-      const totalVehicles = await getCount(db, 'vehicles');
-
-      if (!syncState?.complete ||
-          syncState.inProgress ||
-          syncState.syncRevision !== 2) {
-        throw new Error(
-          'Fahrzeugbestand ist noch nicht vollstaendig geladen. ' +
-          'Bitte den Lauf erneut starten.'
-        );
-      }
-
-      if (totalVehicles === 0) {
-        throw new Error('Der Fahrzeugcache ist leer. Kauf wurde abgebrochen.');
-      }
-
-      if (syncState.recordCount !== totalVehicles) {
-        throw new Error(
-          `Fahrzeugcache unvollstaendig: ${totalVehicles.toLocaleString('de-DE')} ` +
-          `von ${Number(syncState.recordCount ?? 0).toLocaleString('de-DE')} ` +
-          'Datensaetzen vorhanden.'
-        );
-      }
-
-      const elapsedSeconds = Math.floor(
-        (Date.now() - syncStartedAt) / 1_000
-      );
-      setProgress(
-        `${totalVehicles.toLocaleString('de-DE')} Fahrzeuge vollstaendig ` +
-        `geladen (${elapsedSeconds}s)`,
-        1,
-        1,
-        'success'
-      );
-      console.info(
-        '[Autobuy Vehicles] Vollstaendiger Fahrzeugcache:',
-        totalVehicles.toLocaleString('de-DE'),
-        'Fahrzeuge'
-      );
-      const counts = new Map();
-
-      setProgress('Fahrzeugbestand der ausgewaehlten Gebaeude wird gezaehlt...');
-
-      for (const buildingId of new Set(buildingIds.map(Number))) {
-        const vehicles = await getDataByIndex(
-          db,
-          'vehicles',
-          'building_id',
-          IDBKeyRange.only(buildingId)
-        );
-
-        for (const vehicle of vehicles) {
-          const vehicleType = Number(vehicle.vehicle_type);
-          const key = `${buildingId}:${vehicleType}`;
-          counts.set(key, (counts.get(key) ?? 0) + 1);
-        }
-      }
-
-      return counts;
-    } finally {
-      globalThis.removeEventListener('nilspe-sync-progress', onSyncProgress);
-      db.close();
+    if (Number.isInteger(attributeId) && attributeId > 0) {
+      return attributeId;
     }
+
+    const link = row.querySelector('a[href*="/buildings/"]');
+    const source = link?.getAttribute('href') ?? row.innerHTML;
+    const fromRow = Number(source.match(/\/buildings\/(\d+)/)?.[1]);
+    return fromRow || buildingIdFromLocation();
+  }
+
+  async function loadVehicleTable() {
+    const existing = document.getElementById('vehicle_table');
+
+    if (existing) {
+      return existing;
+    }
+
+    const tabLink = document.querySelector(
+      'a[href="#tab_vehicle"], a[href="#tab_vehicles"]'
+    );
+
+    if (!tabLink) {
+      throw new Error('Der Fahrzeug-Tab wurde nicht gefunden.');
+    }
+
+    setProgress('Fahrzeugliste wird geladen ...');
+    tabLink.click();
+
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < 20_000) {
+      const table = document.getElementById('vehicle_table');
+
+      if (table && table.querySelector('tbody')) {
+        return table;
+      }
+
+      await sleep(100);
+    }
+
+    throw new Error('Fahrzeugliste wurde nicht innerhalb von 20 Sekunden geladen.');
+  }
+
+  function vehicleCountsFromTable(buildingIds) {
+    const table = document.getElementById('vehicle_table');
+
+    if (!table) {
+      throw new Error(
+        'Fahrzeugliste nicht geladen. Bitte zuerst den Tab "Fahrzeuge" oeffnen.'
+      );
+    }
+
+    const allowedBuildings = new Set(buildingIds.map(Number));
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    const counts = new Map();
+
+    for (const row of rows) {
+      const buildingId = rowBuildingId(row);
+      const vehicleType = rowVehicleType(row);
+
+      if (!allowedBuildings.has(buildingId) || !Number.isInteger(vehicleType)) {
+        continue;
+      }
+
+      const key = `${buildingId}:${vehicleType}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    setProgress(
+      `${rows.length.toLocaleString('de-DE')} Tabellenzeilen ausgewertet`,
+      1,
+      1,
+      'success'
+    );
+    return counts;
   }
 
   async function buyVehicle(buildingId, vehicleType) {
@@ -603,7 +608,8 @@
 
   async function runForBuildings(buildings) {
     const delays = await configuredDelays();
-    const counts = await vehicleCountsByBuilding(
+    await loadVehicleTable();
+    const counts = vehicleCountsFromTable(
       buildings.map(building => building.id)
     );
     let completed = 0;
