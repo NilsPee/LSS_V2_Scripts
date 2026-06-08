@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Delete Vehicles
 // @namespace    NilsPe.delete.vehicles
-// @version      1.0.0
+// @version      1.0.2
 // @description  Markiert und loescht ausgewaehlte Fahrzeugtypen aus der sichtbaren Fahrzeugtabelle
 // @author       NilsPe
 // @license      MIT
@@ -26,8 +26,7 @@
     vehicleTypes: 'nilspe_delete_vehicle_types',
     keepPerStation: 'nilspe_delete_keep_per_station',
     requestDelay: 'nilspe_delete_request_delay',
-    concurrency: 'nilspe_delete_concurrency',
-    deletionEnabled: 'nilspe_delete_enabled'
+    concurrency: 'nilspe_delete_concurrency'
   };
 
   const sleep = milliseconds =>
@@ -72,13 +71,6 @@
           max: 1_000,
           default: 0
         },
-        { type: 'header', text: 'Sicherheit' },
-        {
-          type: 'checkbox',
-          key: KEYS.deletionEnabled,
-          label: 'Endgueltiges Loeschen freischalten',
-          default: false
-        },
         { type: 'header', text: 'Ablauf' },
         {
           type: 'number',
@@ -86,7 +78,7 @@
           label: 'Pause je Worker [ms]',
           min: 100,
           max: 5_000,
-          default: 250
+          default: 150
         },
         {
           type: 'number',
@@ -94,7 +86,7 @@
           label: 'Parallele Loeschanfragen',
           min: 1,
           max: 3,
-          default: 1
+          default: 3
         }
       ]
     });
@@ -109,16 +101,15 @@
       ),
       requestDelay: Math.max(
         100,
-        Number(await GM.getValue(KEYS.requestDelay, 250)) || 250
+        Number(await GM.getValue(KEYS.requestDelay, 150)) || 150
       ),
       concurrency: Math.max(
         1,
         Math.min(
           3,
-          Number(await GM.getValue(KEYS.concurrency, 1)) || 1
+          Number(await GM.getValue(KEYS.concurrency, 3)) || 3
         )
-      ),
-      deletionEnabled: await GM.getValue(KEYS.deletionEnabled, false) === true
+      )
     };
   }
 
@@ -349,15 +340,6 @@
 
     const config = await configuration();
 
-    if (!config.deletionEnabled) {
-      await preview();
-      globalThis.alert(
-        'Loeschen ist in den Einstellungen nicht freigeschaltet. ' +
-        'Es wurde nur die Vorschau markiert.'
-      );
-      return;
-    }
-
     const rows = rowsToDelete(config);
 
     if (rows.length === 0) {
@@ -469,6 +451,9 @@
     const group = document.createElement('div');
     group.id = 'nilspe-delete-buttons';
     group.className = 'btn-group';
+    group.style.display = 'flex';
+    group.style.width = 'fit-content';
+    group.style.margin = '0';
     const previewButton = document.createElement('button');
     previewButton.type = 'button';
     previewButton.className = 'btn btn-default btn-xs';
@@ -484,9 +469,11 @@
 
     const row = document.createElement('div');
     row.id = 'nilspe-delete-button-row';
-    row.style.display = 'block';
+    row.style.display = 'flex';
     row.style.width = '100%';
-    row.style.margin = '0 0 8px';
+    row.style.margin = '0';
+    row.style.padding = '0';
+    row.style.lineHeight = '0';
     row.append(group);
     table.parentElement?.insertBefore(row, table);
   }
