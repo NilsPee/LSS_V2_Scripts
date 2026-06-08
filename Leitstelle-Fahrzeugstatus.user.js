@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeugstatus 2/6
 // @namespace    NilsPe.vehicle.status
-// @version      1.1.3
+// @version      1.1.4
 // @description  Setzt sichtbare konfigurierte Fahrzeuge auf Status 6 oder wieder auf Status 2
 // @author       NilsPe
 // @license      MIT
@@ -461,8 +461,11 @@
 
     const row = document.createElement('div');
     row.id = 'nilspe-fms-button-row';
-    row.style.display = 'block';
+    row.style.display = 'flex';
     row.style.width = '100%';
+    row.style.margin = '0';
+    row.style.padding = '0';
+    row.style.lineHeight = '0';
     row.append(group);
     table.parentElement?.insertBefore(row, table);
   }
