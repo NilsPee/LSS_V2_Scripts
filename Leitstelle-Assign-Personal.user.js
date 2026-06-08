@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Assign Personal
 // @namespace    NilsPe.assign.personal
-// @version      1.0.1
+// @version      1.0.2
 // @description  Weist den Fahrzeugen eines Gebaeudes automatisch die konfigurierte Besatzung zu
 // @author       NilsPe
 // @license      MIT
@@ -572,7 +572,7 @@
     const group = document.createElement('div');
     group.id = 'nilspe-assign-buttons';
     group.className = 'btn-group';
-    group.style.margin = '8px 0';
+    group.style.margin = '8px 0 0';
     const start = document.createElement('button');
     start.id = 'nilspe-assign-button';
     start.type = 'button';
