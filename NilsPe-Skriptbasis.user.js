@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.7
+// @version      1.0.9
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -23,6 +23,7 @@ const NILSPE_DB_VERSION = 1;
 const NILSPE_PAGE_SIZE = 3_000;
 const NILSPE_VEHICLE_PAGE_SIZE = 5_000;
 const NILSPE_FULL_SYNC_AGE = 24 * 60 * 60 * 1_000;
+const NILSPE_SYNC_REVISION = 2;
 
 const NILSPE_STORES = {
   metadata: { keyPath: 'key' },
@@ -226,6 +227,10 @@ async function readSyncState(db, storeName) {
   return getData(db, 'metadata', `sync:${storeName}`);
 }
 
+async function getSyncState(db, storeName) {
+  return readSyncState(db, storeName);
+}
+
 async function writeSyncState(db, storeName, state) {
   return putRecords(db, 'metadata', {
     key: `sync:${storeName}`,
@@ -373,30 +378,36 @@ async function synchronizeV2(
     const state = await readSyncState(db, storeName);
     const now = Date.now();
 
-    if (state && !state.inProgress && maxAgeSeconds > 0 &&
+    const validState = state?.syncRevision === NILSPE_SYNC_REVISION;
+
+    if (validState && state.complete && !state.inProgress && maxAgeSeconds > 0 &&
         now - state.checkedAt < maxAgeSeconds * 1_000) {
       return false;
     }
 
-    const resuming = Boolean(state?.inProgress && state.resumeUrl);
+    const resuming = Boolean(
+      validState && state?.inProgress && state.resumeUrl
+    );
     const fullSync = resuming
       ? Boolean(state.syncWasFullSync)
-      : !state?.fullSyncAt || now - state.fullSyncAt >= NILSPE_FULL_SYNC_AGE;
+      : !validState || !state?.complete || !state?.fullSyncAt ||
+        now - state.fullSyncAt >= NILSPE_FULL_SYNC_AGE;
     const query = { limit: pageSize };
-    const syncStartedAt = state?.syncStartedAt ??
-      new Date(now - 1_000).toISOString();
+    const syncStartedAt = resuming
+      ? state.syncStartedAt
+      : new Date(now - 1_000).toISOString();
 
     if (!fullSync && state?.changedSince) {
       query.from = state.changedSince;
     }
 
-    let activePageSize = state?.pageSize ?? pageSize;
+    let activePageSize = resuming ? state.pageSize : pageSize;
     let nextUrl = resuming
       ? setPageLimit(state.resumeUrl, activePageSize)
       : withQuery(endpoint, { ...query, limit: activePageSize });
     const visited = new Set();
-    let page = state?.page ?? 0;
-    let recordCount = state?.recordCount ?? 0;
+    let page = resuming ? state.page : 0;
+    let recordCount = resuming ? state.recordCount : 0;
 
     while (nextUrl) {
       if (visited.has(nextUrl)) {
@@ -467,6 +478,8 @@ async function synchronizeV2(
       if (nextUrl) {
         await writeSyncState(db, storeName, {
           inProgress: true,
+          complete: false,
+          syncRevision: NILSPE_SYNC_REVISION,
           resumeUrl: nextUrl,
           page,
           recordCount,
@@ -480,12 +493,16 @@ async function synchronizeV2(
       }
     }
 
+    const storedRecordCount = await getCount(db, storeName);
     await writeSyncState(db, storeName, {
       inProgress: false,
       resumeUrl: null,
+      complete: true,
+      syncRevision: NILSPE_SYNC_REVISION,
       checkedAt: Date.now(),
       changedSince: syncStartedAt,
       fullSyncAt: fullSync ? Date.now() : state.fullSyncAt,
+      recordCount: storedRecordCount,
       pageSize: activePageSize
     });
     return true;
