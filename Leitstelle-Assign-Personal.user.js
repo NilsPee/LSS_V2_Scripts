@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Assign Personal
 // @namespace    NilsPe.assign.personal
-// @version      1.0.2
+// @version      1.0.3
 // @description  Weist den Fahrzeugen eines Gebaeudes automatisch die konfigurierte Besatzung zu
 // @author       NilsPe
 // @license      MIT
@@ -572,7 +572,9 @@
     const group = document.createElement('div');
     group.id = 'nilspe-assign-buttons';
     group.className = 'btn-group';
-    group.style.margin = '8px 0 0';
+    group.style.display = 'flex';
+    group.style.width = 'fit-content';
+    group.style.margin = '0';
     const start = document.createElement('button');
     start.id = 'nilspe-assign-button';
     start.type = 'button';
@@ -580,7 +582,16 @@
     start.textContent = 'Personal zuweisen';
     start.addEventListener('click', runAssignment);
     group.append(start, settingsButton());
-    table.parentElement?.insertBefore(group, table);
+
+    const row = document.createElement('div');
+    row.id = 'nilspe-assign-button-row';
+    row.style.display = 'flex';
+    row.style.width = '100%';
+    row.style.margin = '0';
+    row.style.padding = '0';
+    row.style.lineHeight = '0';
+    row.append(group);
+    table.parentElement?.insertBefore(row, table);
   }
 
   if (location.pathname.startsWith('/settings/index')) {
