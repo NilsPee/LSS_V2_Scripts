@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeugstatus 2/6
 // @namespace    NilsPe.vehicle.status
-// @version      1.1.2
+// @version      1.1.3
 // @description  Setzt sichtbare konfigurierte Fahrzeuge auf Status 6 oder wieder auf Status 2
 // @author       NilsPe
 // @license      MIT
@@ -443,7 +443,7 @@
     group.className = 'btn-group';
     group.style.display = 'flex';
     group.style.width = 'fit-content';
-    group.style.margin = '0 0 8px';
+    group.style.margin = '0';
     const status6 = document.createElement('button');
     status6.type = 'button';
     status6.className = 'btn btn-default btn-xs';
