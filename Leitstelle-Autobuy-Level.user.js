@@ -13,7 +13,7 @@
 // @match        https://*.leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.5
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.7
 // @run-at       document-idle
 // ==/UserScript==
 
