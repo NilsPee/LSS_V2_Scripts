@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Vehicles
 // @namespace    NilsPe.autobuy.vehicles
-// @version      1.2.1
+// @version      1.2.2
 // @description  Kauft konfigurierte Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -422,34 +422,91 @@
     return fromRow || buildingIdFromLocation();
   }
 
-  async function loadVehicleTable() {
-    const existing = document.getElementById('vehicle_table');
+  function vehicleTabPane() {
+    return document.querySelector('#tab_vehicle, #tab_vehicles');
+  }
 
-    if (existing) {
-      return existing;
+  function isVisible(element) {
+    if (!element) {
+      return false;
     }
 
+    const style = getComputedStyle(element);
+    return style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      element.offsetParent !== null;
+  }
+
+  function vehicleTabShowsEmptyState() {
+    const pane = vehicleTabPane();
+    const text = (pane?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+    return /keine fahrzeuge|keine daten|no data/i.test(text);
+  }
+
+  function vehicleTableIsProcessing() {
+    return Array.from(document.querySelectorAll(
+      '#vehicle_table_processing, .dataTables_processing'
+    )).some(isVisible);
+  }
+
+  function vehicleRowLooksValid(row) {
+    return Number.isInteger(rowVehicleType(row));
+  }
+
+  function vehicleTableIsReady(table, allowEmptyState = false) {
+    const tbody = table?.querySelector('tbody');
+
+    if (!tbody || vehicleTableIsProcessing()) {
+      return false;
+    }
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    if (rows.some(vehicleRowLooksValid)) {
+      return true;
+    }
+
+    return allowEmptyState && vehicleTabShowsEmptyState();
+  }
+
+  async function loadVehicleTable() {
     const tabLink = document.querySelector(
       'a[href="#tab_vehicle"], a[href="#tab_vehicles"]'
     );
 
-    if (!tabLink) {
+    if (!tabLink && !document.getElementById('vehicle_table')) {
       throw new Error('Der Fahrzeug-Tab wurde nicht gefunden.');
     }
 
     setProgress('Fahrzeugliste wird geladen ...');
-    tabLink.click();
+    tabLink?.click();
 
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < 20_000) {
       const table = document.getElementById('vehicle_table');
+      const allowEmptyState = Date.now() - startedAt > 1_500;
 
-      if (table && table.querySelector('tbody')) {
+      if (table && vehicleTableIsReady(table, allowEmptyState)) {
         return table;
       }
 
+      if (!table && allowEmptyState && vehicleTabShowsEmptyState()) {
+        return null;
+      }
+
       await sleep(100);
+    }
+
+    const table = document.getElementById('vehicle_table');
+
+    if (table && table.querySelector('tbody')) {
+      return table;
+    }
+
+    if (vehicleTabShowsEmptyState()) {
+      return null;
     }
 
     throw new Error('Fahrzeugliste wurde nicht innerhalb von 20 Sekunden geladen.');
@@ -459,14 +516,15 @@
     const table = document.getElementById('vehicle_table');
 
     if (!table) {
-      throw new Error(
-        'Fahrzeugliste nicht geladen. Bitte zuerst den Tab "Fahrzeuge" oeffnen.'
-      );
+      setProgress('Keine vorhandenen Fahrzeuge gefunden', 1, 1, 'success');
+      return new Map();
     }
 
     const allowedBuildings = new Set(buildingIds.map(Number));
-    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    const rows = Array.from(table.querySelectorAll('tbody tr'))
+      .filter(row => !row.querySelector('.dataTables_empty'));
     const counts = new Map();
+    let evaluated = 0;
 
     for (const row of rows) {
       const buildingId = rowBuildingId(row);
@@ -478,10 +536,11 @@
 
       const key = `${buildingId}:${vehicleType}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
+      evaluated++;
     }
 
     setProgress(
-      `${rows.length.toLocaleString('de-DE')} Tabellenzeilen ausgewertet`,
+      `${evaluated.toLocaleString('de-DE')} Fahrzeugzeilen ausgewertet`,
       1,
       1,
       'success'
