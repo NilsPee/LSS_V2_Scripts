@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BePo-Personal-Werber
 // @namespace    NilsPe.bepo.personnel
-// @version      1.0.1
+// @version      1.0.8
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf BePo-Zielwachen
 // @author       NilsPe
 // @license      MIT
@@ -15,7 +15,7 @@
 // @grant        GM.setValue
 // @grant        GM.deleteValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.9
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.11
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -115,7 +115,7 @@
           label: 'Pause zwischen Anfragen [ms]',
           min: 0,
           max: 5_000,
-          default: 150
+          default: 100
         },
         {
           type: 'select',
@@ -284,7 +284,7 @@
       targetPersonnel: await numberValue(KEYS.targetPersonnel, 0),
       policeReserve: Math.max(await numberValue(KEYS.policeReserve, 36), 2),
       bepoReserve: Math.max(await numberValue(KEYS.bepoReserve, 244), 0),
-      requestDelay: Math.max(await numberValue(KEYS.requestDelay, 150), 0),
+      requestDelay: Math.max(await numberValue(KEYS.requestDelay, 100), 0),
       excludedTargets: new Set(await storedArray(KEYS.excludedTargets)),
       excludedSources: new Set(await storedArray(KEYS.excludedSources)),
       excludedDispatchCenters: new Set(
@@ -340,6 +340,7 @@
           : configuration.policeReserve;
         return {
           ...building,
+          reserve,
           available: Math.max(building.personal_count - reserve, 0)
         };
       })
@@ -372,6 +373,58 @@
     return personnelIds;
   }
 
+  function personnelCountFromDocument(documentFromResponse, buildingId) {
+    const table =
+      documentFromResponse.getElementById(`personal_table_${buildingId}`) ??
+      documentFromResponse.querySelector('table');
+
+    return table?.querySelectorAll('tbody tr input[value]').length ?? null;
+  }
+
+  async function livePersonnelCount(buildingId) {
+    const response = await fetch(
+      `/buildings/${buildingId}/schooling_personal_select`,
+      {
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRF-Token': csrfToken()
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Personalzaehlung HTTP ${response.status}`);
+    }
+
+    const documentFromResponse = new DOMParser().parseFromString(
+      await response.text(),
+      'text/html'
+    );
+    return personnelCountFromDocument(documentFromResponse, buildingId);
+  }
+
+  async function refreshTargetNeed(target, configuration) {
+    try {
+      const liveCount = await livePersonnelCount(target.id);
+
+      if (Number.isInteger(liveCount)) {
+        target.personal_count = Math.max(target.personal_count, liveCount);
+        target.needed = Math.max(
+          configuration.targetPersonnel - target.personal_count,
+          0
+        );
+      }
+    } catch (error) {
+      console.warn(
+        '[BePo-Personal-Werber] Ziel-Personalzaehlung fehlgeschlagen:',
+        target.id,
+        error
+      );
+    }
+
+    return target.needed;
+  }
   async function availablePersonnelIds(sourceBuilding, maximum) {
     const response = await fetch(
       `/buildings/${sourceBuilding.id}/schooling_personal_select`,
@@ -394,8 +447,25 @@
       await response.text(),
       'text/html'
     );
+    const livePersonnel = personnelCountFromDocument(
+      documentFromResponse,
+      sourceBuilding.id
+    );
+    const liveAvailable = Number.isInteger(livePersonnel)
+      ? Math.max(livePersonnel - sourceBuilding.reserve, 0)
+      : sourceBuilding.available;
+    const allowed = Math.min(
+      maximum,
+      sourceBuilding.available,
+      liveAvailable
+    );
+
+    if (allowed <= 0) {
+      return [];
+    }
+
     return untrainedPersonnelIds(documentFromResponse, sourceBuilding.id)
-      .slice(0, Math.min(maximum, sourceBuilding.available));
+      .slice(0, allowed);
   }
 
   async function adoptPersonnel(targetBuildingId, personnelIds) {
@@ -406,14 +476,14 @@
     }
 
     const form = new URLSearchParams();
-    form.append('utf8', '✓');
+    form.append('utf8', 'âœ“');
     form.append('authenticity_token', token);
 
     for (const personnelId of personnelIds) {
       form.append('personal_ids[]', personnelId);
     }
 
-    form.append('commit', 'Personal übernehmen');
+    form.append('commit', 'Personal Ã¼bernehmen');
     const response = await fetch(`/buildings/${targetBuildingId}/adopt`, {
       method: 'POST',
       credentials: 'same-origin',
@@ -445,11 +515,22 @@
         );
         selectedPersonnel.push(...ids);
         source.available -= ids.length;
+
+        if (ids.length === 0) {
+          source.available = 0;
+          continue;
+        }
+
+        if (selectedPersonnel.length >= target.needed) {
+          break;
+        }
       } catch (error) {
         console.warn('[BePo-Personal-Werber] Quelle uebersprungen:', error);
       }
 
-      await sleep(requestDelay);
+      if (requestDelay > 0) {
+        await sleep(requestDelay);
+      }
     }
 
     if (selectedPersonnel.length === 0) {
@@ -480,8 +561,9 @@
         buildingId: type === 11 ? id : null,
         dispatchCenterId: type === 7 ? id : null
       };
-      const targets = selectTargets(buildings, configuration, context);
+      let targets = selectTargets(buildings, configuration, context);
       const sources = selectSources(buildings, configuration);
+
 
       if (targets.length === 0) {
         await stopRun('Keine BePo-Wache muss aufgefuellt werden', 'success');
@@ -508,6 +590,19 @@
         );
 
         try {
+          await refreshTargetNeed(target, configuration);
+
+          if (target.needed <= 0) {
+            completed++;
+            setProgress(
+              `${completed}/${targets.length} Wachen, ${transferred} Personen`,
+              completed,
+              targets.length,
+              errors ? 'warning' : 'success'
+            );
+            continue;
+          }
+
           transferred += await fillTarget(
             target,
             sources,
@@ -598,3 +693,11 @@
 
   addBuildingButtons();
 })();
+
+
+
+
+
+
+
+
