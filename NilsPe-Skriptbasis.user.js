@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.9
+// @version      1.0.11
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -940,6 +940,10 @@ async function optionListFor(selectType) {
       buildings = buildings.filter(building => Number(building.building_type) === 11);
     } else if (selectType === 'bepo_personnel_generating_buildings') {
       buildings = buildings.filter(building => [6, 11].includes(Number(building.building_type)));
+    } else if (selectType === 'police_buildings') {
+      buildings = buildings.filter(building => [6, 19].includes(Number(building.building_type)));
+    } else if (selectType === 'police_personnel_generating_buildings') {
+      buildings = buildings.filter(building => [6, 11, 19].includes(Number(building.building_type)));
     } else if (selectType === 'mission_generating_buildings') {
       buildings = buildings.filter(building => building.generates_mission_categories?.length);
     }
@@ -974,6 +978,7 @@ async function addSelectInput(body, option, index) {
 
   const options = option.options ?? await optionListFor(option.selectType);
   const stored = parseStoredJson(await GM.getValue(option.key, '[]'), []);
+  const storedValues = Array.isArray(stored) ? stored : [stored];
 
   for (const item of options) {
     const element = document.createElement('option');
@@ -981,16 +986,20 @@ async function addSelectInput(body, option, index) {
     element.dataset.value = JSON.stringify(item.value);
     element.textContent = item.name;
     element.disabled = item.disabled ?? false;
-    element.selected = stored.some(value => String(value) === String(item.value));
+    element.selected = storedValues.some(
+      value => String(value) === String(item.value)
+    );
     select.append(element);
   }
 
-  select.addEventListener('change', () => {
+  const saveSelection = () => {
     const values = [...select.selectedOptions].map(element =>
       parseStoredJson(element.dataset.value, element.value)
     );
-    GM.setValue(option.key, JSON.stringify(values));
-  });
+    return GM.setValue(option.key, JSON.stringify(values));
+  };
+
+  select.addEventListener('change', saveSelection);
 
   column.append(label, select);
   addInfoText(column, option.info);
@@ -1008,6 +1017,7 @@ async function addSelectInput(body, option, index) {
   if (picker && typeof picker.selectpicker === 'function') {
     container.className = 'select-container';
     picker.selectpicker();
+    picker.on('changed.bs.select', saveSelection);
   } else {
     select.className = 'form-control';
 
@@ -1050,3 +1060,5 @@ async function addOptions(configuration) {
     anchor.click();
   }
 }
+
+
