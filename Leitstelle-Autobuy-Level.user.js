@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Level
 // @namespace    NilsPe.autobuy.level.api
-// @version      2.4.1
+// @version      2.4.2
 // @description  Autobuy Level mit zentraler NilsPe-Skriptbasis und Fortschrittsbalken
 // @author       NilsPe
 // @license      MIT
