@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Buildings
 // @namespace    NilsPe.activate.buildings
-// @version      1.0.1
+// @version      1.0.2
 // @description  Aktiviert oder deaktiviert konfigurierte Gebaeude einer Leitstelle
 // @author       NilsPe
 // @license      MIT
