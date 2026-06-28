@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Polizei-Personal-Werber
 // @namespace    NilsPe.police.personnel
-// @version      1.0.0
+// @version      1.0.2
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf Polizeiwachen
 // @author       NilsPe
 // @license      MIT
