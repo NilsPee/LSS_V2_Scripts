@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Delete Buildings
 // @namespace    NilsPe.delete.buildings
-// @version      1.0.1
+// @version      1.0.2
 // @description  Markiert und loescht konfigurierte Gebaeude einer Leitstelle
 // @author       NilsPe
 // @license      MIT
