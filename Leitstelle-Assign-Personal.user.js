@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Assign Personal
 // @namespace    NilsPe.assign.personal
-// @version      1.0.3
+// @version      1.0.4
 // @description  Weist den Fahrzeugen eines Gebaeudes automatisch die konfigurierte Besatzung zu
 // @author       NilsPe
 // @license      MIT
