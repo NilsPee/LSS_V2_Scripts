@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Wachenpersonal
 // @namespace    NilsPe.building.personnel
-// @version      2.0.4
+// @version      2.0.5
 // @description  Setzt Personal-Soll und automatische Personalwerbung fuer konfigurierte Wachen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
