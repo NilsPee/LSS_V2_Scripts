@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeugstatus 2/6
 // @namespace    NilsPe.vehicle.status
-// @version      1.1.4
+// @version      1.1.5
 // @description  Setzt sichtbare konfigurierte Fahrzeuge auf Status 6 oder wieder auf Status 2
 // @author       NilsPe
 // @license      MIT
