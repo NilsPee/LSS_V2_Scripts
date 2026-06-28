@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Extensions
 // @namespace    NilsPe.activate.extensions
-// @version      1.0.0
+// @version      1.0.1
 // @description  Aktiviert oder deaktiviert konfigurierte Erweiterungen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
