@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Delete Vehicles
 // @namespace    NilsPe.delete.vehicles
-// @version      1.0.2
+// @version      1.0.3
 // @description  Markiert und loescht ausgewaehlte Fahrzeugtypen aus der sichtbaren Fahrzeugtabelle
 // @author       NilsPe
 // @license      MIT
