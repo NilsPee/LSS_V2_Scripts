@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeug Max-Personal
 // @namespace    NilsPe.vehicle.maxpersonal
-// @version      1.0.1
+// @version      1.0.2
 // @description  Setzt die maximale Personenanzahl konfigurierter Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe & Silberfighter
 // @license      MIT
