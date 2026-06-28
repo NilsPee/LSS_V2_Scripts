@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Vehicles
 // @namespace    NilsPe.autobuy.vehicles
-// @version      1.2.2
+// @version      1.2.3
 // @description  Kauft konfigurierte Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
