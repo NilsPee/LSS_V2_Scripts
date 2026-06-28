@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Extensions
 // @namespace    NilsPe.autobuy.extensions
-// @version      1.1.1
+// @version      1.1.2
 // @description  Kauft konfigurierte Erweiterungen einzelner Gebaeude oder einer Leitstelle
 // @author       NilsPe
 // @license      MIT
