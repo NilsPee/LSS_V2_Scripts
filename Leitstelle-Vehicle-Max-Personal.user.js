@@ -3,7 +3,7 @@
 // @namespace    NilsPe.vehicle.maxpersonal
 // @version      1.0.2
 // @description  Setzt die maximale Personenanzahl konfigurierter Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
-// @author       NilsPe & Silberfighter
+// @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
