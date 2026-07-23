@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Extensions
 // @namespace    NilsPe.autobuy.extensions
-// @version      1.1.2
+// @version      1.1.3
 // @description  Kauft konfigurierte Erweiterungen einzelner Gebaeude oder einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -475,33 +475,38 @@
     }
   }
 
-  async function processBuilding(building, actionDelay) {
-    const selected = await selectedExtensionIds(building.building_type);
+    async function processBuilding(
+    building,
+     actionDelay,
+     configuredExtensionIds = null
+    ) {
+        const selected = configuredExtensionIds ??
+              await selectedExtensionIds(building.building_type);
 
-    if (selected.length === 0) {
-      return { bought: 0, skipped: true };
+        if (selected.length === 0) {
+            return { bought: 0, skipped: true };
+        }
+
+        let purchases = await availableExtensionPurchases(building.id);
+        let bought = 0;
+
+        for (const extensionId of selected) {
+            const purchaseUrl = purchases.get(extensionId);
+
+            if (!purchaseUrl) {
+                continue;
+            }
+
+            await buyExtension(purchaseUrl);
+            bought++;
+            await sleep(actionDelay);
+
+            // Ein Kauf kann die nächste Erweiterung freischalten.
+            purchases = await availableExtensionPurchases(building.id);
+        }
+
+        return { bought, skipped: false };
     }
-
-    let purchases = await availableExtensionPurchases(building.id);
-    let bought = 0;
-
-    for (const extensionId of selected) {
-      const purchaseUrl = purchases.get(extensionId);
-
-      if (!purchaseUrl) {
-        continue;
-      }
-
-      await buyExtension(purchaseUrl);
-      bought++;
-      await sleep(actionDelay);
-
-      // A purchase may unlock the next extension.
-      purchases = await availableExtensionPurchases(building.id);
-    }
-
-    return { bought, skipped: false };
-  }
 
   function ensureProgressBar() {
     if (document.getElementById('nilspe-abe-progress')) {
@@ -567,50 +572,98 @@
     }, delay);
   }
 
-  async function runForBuildings(buildings) {
-    const delays = await configuredDelays();
-    let completed = 0;
-    let errors = 0;
-    let totalBought = 0;
+    async function runForBuildings(buildings) {
+        const delays = await configuredDelays();
 
-    for (const building of buildings) {
-      setProgress(
-        `${completed}/${buildings.length}: ${building.caption}`,
-        completed,
-        buildings.length
-      );
+        // Konfiguration einmalig je vorkommendem Gebäudetyp laden
+        const selectedByBuildingType = new Map();
 
-      try {
-        const result = await processBuilding(building, delays.action);
-        totalBought += result.bought;
-      } catch (error) {
-        errors++;
-        console.error(
-          '[Autobuy Extensions] Fehler bei Gebaeude',
-          building.id,
-          building.caption,
-          error
+        for (const building of buildings) {
+            const buildingType = Number(building.building_type);
+
+            if (!selectedByBuildingType.has(buildingType)) {
+                selectedByBuildingType.set(
+                    buildingType,
+                    await selectedExtensionIds(buildingType)
+                );
+            }
+        }
+
+        // Nur Gebäude behalten, für deren Typ Erweiterungen ausgewählt wurden
+        const configuredBuildings = buildings.filter(building => {
+            const selected = selectedByBuildingType.get(
+                Number(building.building_type)
+            );
+
+            return Array.isArray(selected) && selected.length > 0;
+        });
+
+        if (configuredBuildings.length === 0) {
+            setProgress(
+                'Für diese Gebäude sind keine Erweiterungen ausgewählt',
+                0,
+                0,
+                'warning'
+            );
+            removeProgressBar();
+            return;
+        }
+
+        let completed = 0;
+        let errors = 0;
+        let totalBought = 0;
+
+        for (const building of configuredBuildings) {
+            setProgress(
+                `${completed}/${configuredBuildings.length}: ${building.caption}`,
+                completed,
+                configuredBuildings.length
+            );
+
+            try {
+                const selected = selectedByBuildingType.get(
+                    Number(building.building_type)
+                );
+
+                const result = await processBuilding(
+                    building,
+                    delays.action,
+                    selected
+                );
+
+                totalBought += result.bought;
+            } catch (error) {
+                errors++;
+
+                console.error(
+                    '[Autobuy Extensions] Fehler bei Gebaeude',
+                    building.id,
+                    building.caption,
+                    error
+                );
+            }
+
+            completed++;
+
+            setProgress(
+                `${completed}/${configuredBuildings.length} Gebaeude, ${totalBought} gekauft`,
+                completed,
+                configuredBuildings.length,
+                errors ? 'warning' : 'success'
+            );
+
+            await sleep(delays.building);
+        }
+
+        setProgress(
+            `Fertig: ${totalBought} Erweiterungen gekauft, ${errors} Fehler`,
+            completed,
+            configuredBuildings.length,
+            errors ? 'warning' : 'success'
         );
-      }
 
-      completed++;
-      setProgress(
-        `${completed}/${buildings.length} Gebaeude, ${totalBought} gekauft`,
-        completed,
-        buildings.length,
-        errors ? 'warning' : 'success'
-      );
-      await sleep(delays.building);
+        removeProgressBar();
     }
-
-    setProgress(
-      `Fertig: ${totalBought} Erweiterungen gekauft, ${errors} Fehler`,
-      completed,
-      buildings.length,
-      errors ? 'warning' : 'success'
-    );
-    removeProgressBar();
-  }
 
   function settingsButton() {
     const button = document.createElement('a');
