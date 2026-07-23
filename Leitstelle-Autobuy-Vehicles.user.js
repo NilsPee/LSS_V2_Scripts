@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Vehicles
 // @namespace    NilsPe.autobuy.vehicles
-// @version      1.2.3
+// @version      1.2.4
 // @description  Kauft konfigurierte Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -168,7 +168,7 @@
     const db = await openDb();
 
     try {
-      await updateBuildings(db, 60);
+      await updateBuildings(db, 0);
       return db;
     } catch (error) {
       db.close();
@@ -578,28 +578,36 @@
     }
   }
 
-  async function processBuilding(building, counts, vehicleDelay) {
-    const configuration = await loadConfiguration(building.building_type);
+    async function processBuilding(
+      building,
+      counts,
+      vehicleDelay,
+      configuration = null
+    ) {
+      configuration ??= await loadConfiguration(building.building_type);
 
-    if (configuration.size === 0) {
-      return 0;
-    }
-
-    let bought = 0;
-
-    for (const [vehicleType, wanted] of configuration) {
-      const key = `${building.id}:${vehicleType}`;
-      const current = counts.get(key) ?? 0;
-      for (let index = current; index < wanted; index++) {
-        await buyVehicle(building.id, vehicleType);
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-        bought++;
-        await sleep(vehicleDelay);
+      if (configuration.size === 0) {
+        return 0;
       }
-    }
 
-    return bought;
-  }
+      let bought = 0;
+
+      for (const [vehicleType, wanted] of configuration) {
+        const key = `${building.id}:${vehicleType}`;
+        const current = counts.get(key) ?? 0;
+
+        for (let index = current; index < wanted; index++) {
+          await buyVehicle(building.id, vehicleType);
+
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+          bought++;
+
+          await sleep(vehicleDelay);
+        }
+      }
+
+      return bought;
+    }
 
   function ensureProgressBar() {
     if (document.getElementById('nilspe-abv-progress')) {
@@ -665,57 +673,104 @@
     }, delay);
   }
 
-  async function runForBuildings(buildings) {
-    const delays = await configuredDelays();
-    await loadVehicleTable();
-    const counts = vehicleCountsFromTable(
-      buildings.map(building => building.id)
-    );
-    let completed = 0;
-    let errors = 0;
-    let totalBought = 0;
+    async function runForBuildings(buildings) {
+      const delays = await configuredDelays();
 
-    for (const building of buildings) {
-      setProgress(
-        `${completed}/${buildings.length}: ${building.caption}`,
-        completed,
-        buildings.length
-      );
+      // Konfiguration je Gebäudetyp nur einmal laden
+      const configurationByBuildingType = new Map();
 
-      try {
-        totalBought += await processBuilding(
-          building,
-          counts,
-          delays.vehicle
-        );
-      } catch (error) {
-        errors++;
-        console.error(
-          '[Autobuy Vehicles] Fehler bei Gebaeude',
-          building.id,
-          building.caption,
-          error
-        );
+      for (const building of buildings) {
+        const buildingType = Number(building.building_type);
+
+        if (!configurationByBuildingType.has(buildingType)) {
+          configurationByBuildingType.set(
+            buildingType,
+            await loadConfiguration(buildingType)
+          );
+        }
       }
 
-      completed++;
+      // Nur Gebäude behalten, für deren Typ Fahrzeuge konfiguriert sind
+      const configuredBuildings = buildings.filter(building => {
+        const configuration = configurationByBuildingType.get(
+          Number(building.building_type)
+        );
+
+        return configuration instanceof Map && configuration.size > 0;
+      });
+
+      if (configuredBuildings.length === 0) {
+        setProgress(
+          'Für diese Gebäude sind keine Fahrzeuge konfiguriert',
+          0,
+          0,
+          'warning'
+        );
+
+        removeProgressBar();
+        return;
+      }
+
+      await loadVehicleTable();
+
+      const counts = vehicleCountsFromTable(
+        configuredBuildings.map(building => building.id)
+      );
+
+      let completed = 0;
+      let errors = 0;
+      let totalBought = 0;
+
+      for (const building of configuredBuildings) {
+        setProgress(
+          `${completed}/${configuredBuildings.length}: ${building.caption}`,
+          completed,
+          configuredBuildings.length
+        );
+
+        try {
+          const configuration = configurationByBuildingType.get(
+            Number(building.building_type)
+          );
+
+          totalBought += await processBuilding(
+            building,
+            counts,
+            delays.vehicle,
+            configuration
+          );
+        } catch (error) {
+          errors++;
+
+          console.error(
+            '[Autobuy Vehicles] Fehler bei Gebaeude',
+            building.id,
+            building.caption,
+            error
+          );
+        }
+
+        completed++;
+
+        setProgress(
+          `${completed}/${configuredBuildings.length} Gebaeude, ${totalBought} gekauft`,
+          completed,
+          configuredBuildings.length,
+          errors ? 'warning' : 'success'
+        );
+
+        await sleep(delays.building);
+      }
+
       setProgress(
-        `${completed}/${buildings.length} Gebaeude, ${totalBought} gekauft`,
+        `Fertig: ${totalBought} Fahrzeuge gekauft, ${errors} Fehler`,
         completed,
-        buildings.length,
+        configuredBuildings.length,
         errors ? 'warning' : 'success'
       );
-      await sleep(delays.building);
-    }
 
-    setProgress(
-      `Fertig: ${totalBought} Fahrzeuge gekauft, ${errors} Fehler`,
-      completed,
-      buildings.length,
-      errors ? 'warning' : 'success'
-    );
-    removeProgressBar();
-  }
+      removeProgressBar();
+    }
 
   function settingsButton() {
     const button = document.createElement('a');
@@ -818,5 +873,3 @@
     }
   );
 })();
-
-
