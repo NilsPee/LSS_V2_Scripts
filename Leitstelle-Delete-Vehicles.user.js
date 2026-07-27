@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Delete Vehicles
 // @namespace    NilsPe.delete.vehicles
-// @version      1.0.3
+// @version      1.0.4
 // @description  Markiert und loescht ausgewaehlte Fahrzeugtypen aus der sichtbaren Fahrzeugtabelle
 // @author       NilsPe
 // @license      MIT
@@ -25,6 +25,7 @@
   const KEYS = {
     vehicleTypes: 'nilspe_delete_vehicle_types',
     keepPerStation: 'nilspe_delete_keep_per_station',
+    everyNthStation: 'nilspe_delete_every_nth_station',
     requestDelay: 'nilspe_delete_request_delay',
     concurrency: 'nilspe_delete_concurrency'
   };
@@ -71,6 +72,14 @@
           max: 1_000,
           default: 0
         },
+        {
+          type: 'number',
+          key: KEYS.everyNthStation,
+          label: 'Nur auf jeder n-ten Wache loeschen (1 = alle)',
+          min: 1,
+          max: 1_000,
+          default: 1
+        },
         { type: 'header', text: 'Ablauf' },
         {
           type: 'number',
@@ -98,6 +107,10 @@
       keepPerStation: Math.max(
         0,
         Number(await GM.getValue(KEYS.keepPerStation, 0)) || 0
+      ),
+      everyNthStation: Math.max(
+        1,
+        Math.floor(Number(await GM.getValue(KEYS.everyNthStation, 1)) || 1)
       ),
       requestDelay: Math.max(
         100,
@@ -146,8 +159,24 @@
   }
 
   function rowsToDelete(config) {
-    const matching = vehicleRows().filter(row =>
-      config.types.has(vehicleType(row))
+    const rows = vehicleRows();
+    const stationPositions = new Map();
+    let stationPosition = 0;
+
+    for (const row of rows) {
+      const id = stationId(row);
+
+      if (!stationPositions.has(id)) {
+        stationPositions.set(id, ++stationPosition);
+      }
+    }
+
+    const matching = rows.filter(row =>
+      config.types.has(vehicleType(row)) &&
+      (
+        config.everyNthStation === 1 ||
+        stationPositions.get(stationId(row)) % config.everyNthStation === 0
+      )
     );
 
     if (config.keepPerStation <= 0) {
