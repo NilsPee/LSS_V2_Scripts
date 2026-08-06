@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.11
+// @version      1.0.12
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
