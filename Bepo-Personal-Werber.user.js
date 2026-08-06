@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BePo-Personal-Werber
 // @namespace    NilsPe.bepo.personnel
-// @version      1.0.12
+// @version      1.0.10
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf BePo-Zielwachen
 // @author       NilsPe
 // @license      MIT
@@ -15,7 +15,7 @@
 // @grant        GM.setValue
 // @grant        GM.deleteValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.11
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
 // @run-at       document-idle
 // ==/UserScript==
 
