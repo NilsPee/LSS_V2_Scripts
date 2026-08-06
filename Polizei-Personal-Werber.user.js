@@ -15,7 +15,7 @@
 // @grant        GM.setValue
 // @grant        GM.deleteValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.11
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
 // @run-at       document-idle
 // ==/UserScript==
 
