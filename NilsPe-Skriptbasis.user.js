@@ -18,8 +18,65 @@
 
 'use strict';
 
-const NILSPE_DB_NAME = 'nilspe-lss-cache';
+const NILSPE_DB_NAME_PREFIX = 'nilspe-lss-cache';
 const NILSPE_DB_VERSION = 1;
+
+let nilspeAccountIdPromise = null;
+
+async function getCurrentAccountId() {
+  if (!nilspeAccountIdPromise) {
+    nilspeAccountIdPromise = (async () => {
+      const possiblePageIds = [
+        unsafeWindow?.user_id,
+        unsafeWindow?.userId,
+        unsafeWindow?.current_user_id,
+        unsafeWindow?.currentUserId
+      ];
+
+      for (const value of possiblePageIds) {
+        const id = Number(value);
+
+        if (Number.isInteger(id) && id > 0) {
+          return id;
+        }
+      }
+
+      const response = await fetch('/api/userinfo', {
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Account-ID konnte nicht geladen werden: HTTP ${response.status}`
+        );
+      }
+
+      const payload = await response.json();
+      const data = payload?.result ?? payload;
+
+      const id = Number(
+        data?.user_id ??
+        data?.id
+      );
+
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new Error('In /api/userinfo wurde keine gültige Account-ID gefunden.');
+      }
+
+      return id;
+    })();
+  }
+
+  return nilspeAccountIdPromise;
+}
+
+async function getAccountDatabaseName() {
+  const accountId = await getCurrentAccountId();
+  return `${NILSPE_DB_NAME_PREFIX}-${accountId}`;
+}
 const NILSPE_PAGE_SIZE = 3_000;
 const NILSPE_VEHICLE_PAGE_SIZE = 5_000;
 const NILSPE_FULL_SYNC_AGE = 24 * 60 * 60 * 1_000;
@@ -63,8 +120,11 @@ const NILSPE_STORES = {
 };
 
 async function openDb() {
+  const databaseName = await getAccountDatabaseName();
+  const lockName = `nilspe-lss-db-open:${databaseName}`;
+
   const open = () => new Promise((resolve, reject) => {
-    const request = indexedDB.open(NILSPE_DB_NAME, NILSPE_DB_VERSION);
+    const request = indexedDB.open(databaseName, NILSPE_DB_VERSION);
 
     request.onupgradeneeded = event => {
       const db = event.target.result;
@@ -72,11 +132,18 @@ async function openDb() {
       for (const [name, definition] of Object.entries(NILSPE_STORES)) {
         const store = db.objectStoreNames.contains(name)
           ? event.target.transaction.objectStore(name)
-          : db.createObjectStore(name, { keyPath: definition.keyPath });
+          : db.createObjectStore(name, {
+              keyPath: definition.keyPath
+            });
 
-        for (const [indexName, keyPath] of Object.entries(definition.indexes ?? {})) {
+        for (
+          const [indexName, keyPath]
+          of Object.entries(definition.indexes ?? {})
+        ) {
           if (!store.indexNames.contains(indexName)) {
-            store.createIndex(indexName, keyPath, { unique: false });
+            store.createIndex(indexName, keyPath, {
+              unique: false
+            });
           }
         }
       }
@@ -84,11 +151,16 @@ async function openDb() {
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error('IndexedDB upgrade is blocked by another tab.'));
+
+    request.onblocked = () => reject(
+      new Error(
+        `IndexedDB-Upgrade für ${databaseName} wird durch einen anderen Tab blockiert.`
+      )
+    );
   });
 
   if (navigator.locks?.request) {
-    return navigator.locks.request('nilspe-lss-db-open', open);
+    return navigator.locks.request(lockName, open);
   }
 
   return open();
