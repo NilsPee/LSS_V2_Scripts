@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Besatzungs-Checker
 // @namespace    NilsPe.assignment.checker
-// @version      1.0.3
+// @version      1.0.4
 // @description  Prueft Soll- und Ist-Besatzung sichtbarer Fahrzeuge inklusive passender Ausbildung
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -420,43 +421,43 @@
       let completed = 0;
       let errors = 0;
 
-      for (const job of jobs) {
-        if (!running) {
-          return;
-        }
+      await runWithConcurrency(
+        jobs,
+        async job => {
+          try {
+            const documentFromResponse = await assignmentDocument(job.id);
+            displayResult(
+              job.cell,
+              targets.get(job.type),
+              qualifiedAssignedCount(documentFromResponse, job.type)
+            );
+          } catch (error) {
+            errors++;
+            console.error(
+              '[Leitstelle Besatzungs-Checker] Fahrzeug fehlgeschlagen:',
+              job.id,
+              error
+            );
+          }
 
-        setProgress(
-          `${completed}/${jobs.length} Fahrzeuge geprueft`,
-          completed,
-          errors,
-          jobs.length
-        );
-
-        try {
-          const documentFromResponse = await assignmentDocument(job.id);
-          displayResult(
-            job.cell,
-            targets.get(job.type),
-            qualifiedAssignedCount(documentFromResponse, job.type)
+          completed++;
+          setProgress(
+            `${completed}/${jobs.length} Fahrzeuge geprueft`,
+            completed,
+            errors,
+            jobs.length,
+            errors ? 'warning' : 'success'
           );
-        } catch (error) {
-          errors++;
-          console.error(
-            '[Leitstelle Besatzungs-Checker] Fahrzeug fehlgeschlagen:',
-            job.id,
-            error
-          );
+        },
+        {
+          concurrency: 3,
+          delay,
+          shouldContinue: () => running
         }
+      );
 
-        completed++;
-        setProgress(
-          `${completed}/${jobs.length} Fahrzeuge geprueft`,
-          completed,
-          errors,
-          jobs.length,
-          errors ? 'warning' : 'success'
-        );
-        await sleep(delay);
+      if (!running) {
+        return;
       }
 
       setProgress(

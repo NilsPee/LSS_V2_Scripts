@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         BePo-Personal-Werber
+// @name         Leitstelle-Bepo-Werber
 // @namespace    NilsPe.bepo.personnel
 // @version      1.0.11
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf BePo-Zielwachen
@@ -7,15 +7,15 @@
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
-// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/BePo-Personal-Werber.user.js
-// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/BePo-Personal-Werber.user.js
+// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Bepo-Werber.user.js
+// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Bepo-Werber.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM.deleteValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
 // @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
@@ -24,7 +24,6 @@
   'use strict';
 
   const SETTINGS_IDENTIFIER = 'nilspe_bepo_personnel';
-
   let RUN_LOCK_KEY = null;
   let SESSION_RUN_KEY = null;
 
@@ -41,23 +40,18 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  async function initializeAccountKeys() {
-    if (RUN_LOCK_KEY && SESSION_RUN_KEY) {
-      return;
-    }
-
-    const accountId = await getCurrentAccountId();
-
-    RUN_LOCK_KEY = `nilspe_bepo_personnel_running_${accountId}`;
-    SESSION_RUN_KEY = `nilspe_bepo_personnel_session_${accountId}`;
-  }
-
   function parseJson(value, fallback) {
     try {
       return JSON.parse(value);
     } catch {
       return fallback;
     }
+  }
+
+  async function initializeAccountKeys() {
+    const accountId = await getCurrentAccountId();
+    RUN_LOCK_KEY = `nilspe_bepo_personnel_running_${accountId}`;
+    SESSION_RUN_KEY = `nilspe_bepo_personnel_session_${accountId}`;
   }
 
   async function storedArray(key) {
@@ -266,7 +260,9 @@
   }
 
   async function acquireRunLock() {
-    await initializeAccountKeys();
+    if (!RUN_LOCK_KEY || !SESSION_RUN_KEY) {
+      await initializeAccountKeys();
+    }
 
     const globalLock = await GM.getValue(RUN_LOCK_KEY, false);
 
@@ -450,7 +446,7 @@
 
     return target.needed;
   }
-  async function availablePersonnelIds(sourceBuilding, maximum) {
+  async function availablePersonnelIds(sourceBuilding) {
     const response = await fetch(
       `/buildings/${sourceBuilding.id}/schooling_personal_select`,
       {
@@ -479,11 +475,7 @@
     const liveAvailable = Number.isInteger(livePersonnel)
       ? Math.max(livePersonnel - sourceBuilding.reserve, 0)
       : sourceBuilding.available;
-    const allowed = Math.min(
-      maximum,
-      sourceBuilding.available,
-      liveAvailable
-    );
+    const allowed = Math.min(sourceBuilding.available, liveAvailable);
 
     if (allowed <= 0) {
       return [];
@@ -521,8 +513,9 @@
     }
   }
 
-  async function fillTarget(target, sources, requestDelay) {
+  async function fillTarget(target, sources, requestDelay, personnelPools) {
     const selectedPersonnel = [];
+    const selections = [];
 
     for (const source of sources) {
       if (!runIsActive() || selectedPersonnel.length >= target.needed) {
@@ -534,17 +527,29 @@
       }
 
       try {
-        const ids = await availablePersonnelIds(
-          source,
-          target.needed - selectedPersonnel.length
+        if (!personnelPools.has(source.id)) {
+          personnelPools.set(
+            source.id,
+            await availablePersonnelIds(source)
+          );
+        }
+
+        const pool = personnelPools.get(source.id);
+        const count = Math.min(
+          target.needed - selectedPersonnel.length,
+          source.available,
+          pool.length
         );
-        selectedPersonnel.push(...ids);
-        source.available -= ids.length;
+        const ids = pool.splice(0, count);
 
         if (ids.length === 0) {
           source.available = 0;
           continue;
         }
+
+        selectedPersonnel.push(...ids);
+        selections.push({ source, pool, ids });
+        source.available -= ids.length;
 
         if (selectedPersonnel.length >= target.needed) {
           break;
@@ -562,7 +567,17 @@
       return 0;
     }
 
-    await adoptPersonnel(target.id, selectedPersonnel);
+    try {
+      await adoptPersonnel(target.id, selectedPersonnel);
+    } catch (error) {
+      for (const { source, pool, ids } of selections.reverse()) {
+        pool.unshift(...ids);
+        source.available += ids.length;
+      }
+
+      throw error;
+    }
+
     return selectedPersonnel.length;
   }
 
@@ -572,7 +587,6 @@
         setProgress('Personalwerber laeuft bereits.', 0, 0, 'warning');
         return;
       }
-
       setProgress('Gebaeude werden geladen...');
       const configuration = await loadConfiguration();
 
@@ -603,6 +617,7 @@
       let completed = 0;
       let errors = 0;
       let transferred = 0;
+      const personnelPools = new Map();
 
       for (const target of targets) {
         if (!runIsActive()) {
@@ -632,7 +647,8 @@
           transferred += await fillTarget(
             target,
             sources,
-            configuration.requestDelay
+            configuration.requestDelay,
+            personnelPools
           );
         } catch (error) {
           errors++;
@@ -719,3 +735,11 @@
 
   addBuildingButtons();
 })();
+
+
+
+
+
+
+
+

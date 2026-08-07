@@ -61,9 +61,9 @@ fehlende Anzahl je Fahrzeugtyp und Gebaeude. Die kaufbaren Fahrzeugtypen und
 Kaufoptionen werden auf den Fahrzeug-Kaufseiten der jeweiligen Gebaeude
 ermittelt.
 
-## BePo-Personal-Werber
+## Leitstelle-Bepo-Werber
 
-**Datei:** `BePo-Personal-Werber.user.js`
+**Datei:** `Leitstelle-Bepo-Werber.user.js`
 
 Verteilt unausgebildetes Personal aus Polizei- und Bereitschaftspolizeiwachen
 auf ausgewaehlte BePo-Zielwachen.

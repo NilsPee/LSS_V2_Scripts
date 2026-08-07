@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         NilsPe LSS Core
 // @namespace    https://github.com/NilsPee/LSS_V2_Scripts
-// @version      1.0.12
+// @version      1.0.13
 // @description  Gemeinsamer API-Cache und Einstellungsbaukasten fuer NilsPe Userscripts
 // @author       NilsPe
 // @license      MIT
@@ -13,6 +13,7 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-start
 // ==/UserScript==
 
@@ -754,6 +755,59 @@ function dataNeedsUpdate(db, type, maxAge) {
   });
 }
 
+async function runWithConcurrency(
+  items,
+  worker,
+  {
+    concurrency = 3,
+    delay = 0,
+    shouldContinue = () => true
+  } = {}
+) {
+  const queue = Array.from(items);
+  const workerCount = Math.min(
+    Math.max(1, Math.floor(Number(concurrency)) || 1),
+    queue.length
+  );
+  const pause = Math.max(0, Number(delay) || 0);
+  let nextIndex = 0;
+  let nextStartAt = Date.now();
+
+  async function waitForStartSlot() {
+    if (pause <= 0) {
+      return;
+    }
+
+    const scheduledAt = nextStartAt;
+    nextStartAt = Math.max(nextStartAt, Date.now()) + pause;
+    const wait = scheduledAt - Date.now();
+
+    if (wait > 0) {
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
+  }
+
+  async function runWorker() {
+    while (shouldContinue()) {
+      const index = nextIndex++;
+
+      if (index >= queue.length) {
+        return;
+      }
+
+      await waitForStartSlot();
+
+      if (!shouldContinue()) {
+        return;
+      }
+
+      await worker(queue[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, runWorker));
+}
+
 async function waitForSettingsDom(timeoutMs = 15_000) {
   const ready = () =>
     document.getElementById('tabs') &&
@@ -955,7 +1009,9 @@ async function addHotkeyInput(body, option, index) {
   body.append(group);
 }
 
-async function optionListFor(selectType) {
+const nilspeOptionListCache = new Map();
+
+async function loadOptionListFor(selectType) {
   if (!selectType) {
     return [];
   }
@@ -1004,20 +1060,33 @@ async function optionListFor(selectType) {
     }
 
     await updateBuildings(db);
-    let buildings = await getAllData(db, 'buildings');
 
-    if (selectType === 'dispatch_centers') {
-      buildings = buildings.filter(building => Number(building.building_type) === 7);
-    } else if (selectType === 'bepo_buildings') {
-      buildings = buildings.filter(building => Number(building.building_type) === 11);
-    } else if (selectType === 'bepo_personnel_generating_buildings') {
-      buildings = buildings.filter(building => [6, 11].includes(Number(building.building_type)));
-    } else if (selectType === 'police_buildings') {
-      buildings = buildings.filter(building => [6, 19].includes(Number(building.building_type)));
-    } else if (selectType === 'police_personnel_generating_buildings') {
-      buildings = buildings.filter(building => [6, 11, 19].includes(Number(building.building_type)));
-    } else if (selectType === 'mission_generating_buildings') {
-      buildings = buildings.filter(building => building.generates_mission_categories?.length);
+    const buildingTypesBySelect = {
+      dispatch_centers: [7],
+      bepo_buildings: [11],
+      bepo_personnel_generating_buildings: [6, 11],
+      police_buildings: [6, 19],
+      police_personnel_generating_buildings: [6, 11, 19]
+    };
+    const buildingTypes = buildingTypesBySelect[selectType];
+    let buildings;
+
+    if (buildingTypes) {
+      buildings = (
+        await Promise.all(
+          buildingTypes.map(buildingType =>
+            getDataByIndex(db, 'buildings', 'building_type', buildingType)
+          )
+        )
+      ).flat();
+    } else {
+      buildings = await getAllData(db, 'buildings');
+    }
+
+    if (selectType === 'mission_generating_buildings') {
+      buildings = buildings.filter(building =>
+        building.generates_mission_categories?.length
+      );
     }
 
     return buildings.map(building => ({
@@ -1027,6 +1096,22 @@ async function optionListFor(selectType) {
   } finally {
     db.close();
   }
+}
+
+async function optionListFor(selectType) {
+  if (!selectType) {
+    return [];
+  }
+
+  if (!nilspeOptionListCache.has(selectType)) {
+    const request = loadOptionListFor(selectType).catch(error => {
+      nilspeOptionListCache.delete(selectType);
+      throw error;
+    });
+    nilspeOptionListCache.set(selectType, request);
+  }
+
+  return nilspeOptionListCache.get(selectType);
 }
 
 async function addSelectInput(body, option, index) {
@@ -1051,6 +1136,7 @@ async function addSelectInput(body, option, index) {
   const options = option.options ?? await optionListFor(option.selectType);
   const stored = parseStoredJson(await GM.getValue(option.key, '[]'), []);
   const storedValues = Array.isArray(stored) ? stored : [stored];
+  const storedValueSet = new Set(storedValues.map(String));
 
   for (const item of options) {
     const element = document.createElement('option');
@@ -1058,9 +1144,7 @@ async function addSelectInput(body, option, index) {
     element.dataset.value = JSON.stringify(item.value);
     element.textContent = item.name;
     element.disabled = item.disabled ?? false;
-    element.selected = storedValues.some(
-      value => String(value) === String(item.value)
-    );
+    element.selected = storedValueSet.has(String(item.value));
     select.append(element);
   }
 
@@ -1109,26 +1193,50 @@ async function addOptions(configuration) {
     configuration.identifier,
     configuration.title
   );
-  body.replaceChildren();
+  let renderPromise = null;
 
-  for (const [index, option] of configuration.settings.entries()) {
-    if (option.type === 'header') {
-      const tag = /^h[1-6]$/.test(option.header) ? option.header : 'h2';
-      const heading = document.createElement(tag);
-      heading.textContent = option.text;
-      body.append(heading);
-    } else if (option.type === 'checkbox') {
-      await addCheckboxInput(body, option, index);
-    } else if (option.type === 'select') {
-      await addSelectInput(body, option, index);
-    } else if (option.type === 'hotkey') {
-      await addHotkeyInput(body, option, index);
-    } else if (['text', 'number', 'time'].includes(option.type)) {
-      await addBasicInput(body, option, index, option.type);
+  const render = () => {
+    if (renderPromise) {
+      return renderPromise;
     }
-  }
+
+    renderPromise = (async () => {
+      body.replaceChildren();
+
+      for (const [index, option] of configuration.settings.entries()) {
+        if (option.type === 'header') {
+          const tag = /^h[1-6]$/.test(option.header) ? option.header : 'h2';
+          const heading = document.createElement(tag);
+          heading.textContent = option.text;
+          body.append(heading);
+        } else if (option.type === 'checkbox') {
+          await addCheckboxInput(body, option, index);
+        } else if (option.type === 'select') {
+          await addSelectInput(body, option, index);
+        } else if (option.type === 'hotkey') {
+          await addHotkeyInput(body, option, index);
+        } else if (['text', 'number', 'time'].includes(option.type)) {
+          await addBasicInput(body, option, index, option.type);
+        }
+      }
+    })().catch(error => {
+      renderPromise = null;
+      console.error(
+        `[NilsPe LSS Core] Einstellungen ${configuration.identifier} konnten nicht geladen werden:`,
+        error
+      );
+      throw error;
+    });
+
+    return renderPromise;
+  };
+
+  anchor.addEventListener('click', () => {
+    void render().catch(() => {});
+  });
 
   if (location.hash === `#${configuration.identifier}`) {
+    await render();
     anchor.click();
   }
 }

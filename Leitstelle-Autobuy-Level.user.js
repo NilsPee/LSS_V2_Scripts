@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Level
 // @namespace    NilsPe.autobuy.level.api
-// @version      2.4.2
+// @version      2.4.3
 // @description  Autobuy Level mit zentraler NilsPe-Skriptbasis und Fortschrittsbalken
 // @author       NilsPe
 // @license      MIT
@@ -13,7 +13,8 @@
 // @match        https://*.leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -112,9 +113,21 @@
   //----------------------------------------------
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
+  const targetLevelPromises = new Map();
+
   async function getTargetLevel(typeId) {
-    const v = await GM.getValue(KEY_LEVEL_PREFIX + String(typeId));
-    return Number(v ?? 0) || 0;
+    const key = String(typeId);
+
+    if (!targetLevelPromises.has(key)) {
+      targetLevelPromises.set(
+        key,
+        GM.getValue(KEY_LEVEL_PREFIX + key).then(value =>
+          Number(value ?? 0) || 0
+        )
+      );
+    }
+
+    return targetLevelPromises.get(key);
   }
 
   async function getConfiguredDelays() {

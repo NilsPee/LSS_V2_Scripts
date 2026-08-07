@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Delete Vehicles
 // @namespace    NilsPe.delete.vehicles
-// @version      1.0.4
+// @version      1.0.5
 // @description  Markiert und loescht ausgewaehlte Fahrzeugtypen aus der sichtbaren Fahrzeugtabelle
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 

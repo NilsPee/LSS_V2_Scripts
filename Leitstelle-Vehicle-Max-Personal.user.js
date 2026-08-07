@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeug Max-Personal
 // @namespace    NilsPe.vehicle.maxpersonal
-// @version      1.0.2
+// @version      1.0.3
 // @description  Setzt die maximale Personenanzahl konfigurierter Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -598,22 +599,44 @@
     let completed = 0;
     let errors = 0;
 
-    for (const job of jobs) {
-      setProgress(`${completed}/${jobs.length}: Fahrzeug ${job.vehicleId} -> ${job.target}`, completed, jobs.length);
+    await runWithConcurrency(
+      jobs,
+      async job => {
+        setProgress(
+          `${completed}/${jobs.length}: Fahrzeug ${job.vehicleId} -> ${job.target}`,
+          completed,
+          jobs.length
+        );
 
-      try {
-        await changeVehicleMaxPersonal(job.vehicleId, job.target);
-      } catch (error) {
-        errors++;
-        console.error('[Fahrzeug Max-Personal] Fehler bei Fahrzeug', job.vehicleId, job, error);
-      }
+        try {
+          await changeVehicleMaxPersonal(job.vehicleId, job.target);
+        } catch (error) {
+          errors++;
+          console.error(
+            '[Fahrzeug Max-Personal] Fehler bei Fahrzeug',
+            job.vehicleId,
+            job,
+            error
+          );
+        }
 
-      completed++;
-      setProgress(`${completed}/${jobs.length} Fahrzeuge geaendert`, completed, jobs.length, errors ? 'warning' : 'success');
-      await sleep(delays.vehicle);
-    }
+        completed++;
+        setProgress(
+          `${completed}/${jobs.length} Fahrzeuge geaendert`,
+          completed,
+          jobs.length,
+          errors ? 'warning' : 'success'
+        );
+      },
+      { concurrency: 3, delay: delays.vehicle }
+    );
 
-    setProgress(`Fertig: ${completed - errors} Fahrzeuge geaendert, ${errors} Fehler`, completed, jobs.length, errors ? 'warning' : 'success');
+    setProgress(
+      `Fertig: ${completed - errors} Fahrzeuge geaendert, ${errors} Fehler`,
+      completed,
+      jobs.length,
+      errors ? 'warning' : 'success'
+    );
     await sleep(delays.building);
     removeProgressBar(3_000);
   }
