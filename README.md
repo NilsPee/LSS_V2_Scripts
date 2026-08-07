@@ -72,6 +72,18 @@ Das Skript fuellt die Zielwachen bis zum eingestellten Personalwert auf. Fuer
 Quellwachen koennen Mindestpersonalwerte festgelegt werden. Einzelne Quell- und
 Zielwachen sowie komplette Leitstellen lassen sich ein- oder ausschliessen.
 
+
+## Leitstelle-Pol-Werber
+
+**Datei:** `Leitstelle-Pol-Werber.user.js`
+
+Verteilt unausgebildetes Personal aus Polizei- und Bereitschaftspolizeiwachen
+auf ausgewaehlte Polizeiwachen.
+
+Das Skript fuellt Polizeiwachen bis zum eingestellten Personalwert auf. Fuer
+Quellwachen koennen Mindestpersonalwerte festgelegt werden. Einzelne Quell- und
+Zielwachen sowie komplette Leitstellen lassen sich ein- oder ausschliessen.
+
 ## Leitstelle Assign Personal
 
 **Datei:** `Leitstelle-Assign-Personal.user.js`
@@ -147,6 +159,18 @@ oder Status 6.
 Die zu bearbeitenden Fahrzeugtypen werden in den Einstellungen festgelegt.
 Beim Setzen auf Status 6 kann je Fahrzeugtyp und Wache eine bestimmte Anzahl
 von Fahrzeugen in Status 2 verbleiben.
+
+
+## Leitstelle Fahrzeug Max-Personal
+
+**Datei:** `Leitstelle-Vehicle-Max-Personal.user.js`
+
+Setzt die maximale Besatzungsstaerke konfigurierter Fahrzeuge fuer ein
+einzelnes Gebaeude oder fuer die Gebaeude einer Leitstelle.
+
+Die Zielwerte werden nach Fahrzeugtyp festgelegt. Das Skript prueft die
+sichtbare Fahrzeugtabelle und aendert nur Fahrzeuge, deren aktueller Wert vom
+konfigurierten Maximum abweicht.
 
 ## Leitstelle Wachenpersonal
 
