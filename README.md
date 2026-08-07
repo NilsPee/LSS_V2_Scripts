@@ -183,3 +183,67 @@ Fuer jeden unterstuetzten Gebaeudetyp kann ein eigener Personal-Sollwert
 eingestellt werden. Nach einem Klick auf `Personal setzen` uebernimmt das
 Skript die Werte fuer alle passenden Gebaeude der geoeffneten Leitstelle und
 stellt die Personalwerbung auf automatisch.
+
+## Baumeister 2.0
+
+**Datei:** `Baumeister-2.user.js`
+
+Merkt einzelne Baupositionen oder komplette Raster auf der Karte vor und baut
+die geplanten Gebaeude kontrolliert nacheinander. Namen, Nummerierung,
+Gebaeudekombinationen und Leitstellenzuordnung lassen sich vor dem Start
+festlegen.
+
+## Lehrgangsmeister
+
+**Datei:** `Lehrgangsmeister.user.js`
+
+Vereinfacht das Erstellen und Befuellen vieler Lehrgaenge. Schul- und
+Gebaeudedaten werden ueber den gemeinsamen API-Cache geladen; unabhaengige
+Raumaktionen laufen mit begrenzter Parallelitaet.
+
+## LSS Freigabenzaehler
+
+**Datei:** `LSS-Own-Alliance-Mission-Count.user.js`
+
+Zeigt konfigurierbare Zaehler und Credit-Summen oberhalb der Einsatzliste.
+Enthalten sind unter anderem eigene Freigaben sowie angefahrene und offene
+Verbandseinsaetze. Basiert auf dem MIT-lizenzierten Skript von Jan (jxn_30).
+
+## LSS A Baumodus
+
+**Datei:** `LSS-A-Baumodus.user.js`
+
+Reduziert auf der Hauptseite Einsatzliste und Missionsaktualisierungen, damit
+groessere Bauvorgaenge fluessiger laufen. Der Baumeister und die
+Gebaeudedaten bleiben dabei nutzbar.
+
+Der Baumodus und der Einsatzmodus sind alternative Betriebsarten und sollten
+nicht gleichzeitig aktiviert werden.
+
+## LSS A Einsatzmodus
+
+**Datei:** `LSS-A-Einsatzmodus.user.js`
+
+Blendet auf der Hauptseite nur die Gebaeudeliste aus. Karte, Gebaeude und
+Einsatzlisten bleiben aktiv.
+
+Der Einsatzmodus und der Baumodus sind alternative Betriebsarten und sollten
+nicht gleichzeitig aktiviert werden.
+
+## LSS Toplist Distance
+
+**Datei:** `LSS-Toplist-Distance.user.js`
+
+Zeigt Credit-Abstaende in der Topliste und speichert einen begrenzten Verlauf
+fuer das Diagramm. Basiert auf einem MIT-lizenzierten Skript von Jan (jxn_30).
+
+## Wachen/Fhz Navigation Hotkeys
+
+**Datei:** `Wachen-Fhz-Navigation-Hotkeys.user.js`
+
+Ergaenzt die Navigation auf Gebaeude- und Fahrzeugseiten um Hotkeys. Die
+Tasten `A` und `D` beziehungsweise die Pfeiltasten wechseln zum vorherigen
+oder naechsten Eintrag. Auf Gebaeudeseiten oeffnet `W` den mittleren Link und
+`S` den Fahrzeugkauf. In Eingabefeldern und im geoeffneten Baumeister sind
+die Hotkeys deaktiviert.
+
