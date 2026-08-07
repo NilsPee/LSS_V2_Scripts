@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BePo-Personal-Werber
 // @namespace    NilsPe.bepo.personnel
-// @version      1.0.10
+// @version      1.0.11
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf BePo-Zielwachen
 // @author       NilsPe
 // @license      MIT
@@ -16,6 +16,7 @@
 // @grant        GM.deleteValue
 // @grant        unsafeWindow
 // @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -23,8 +24,9 @@
   'use strict';
 
   const SETTINGS_IDENTIFIER = 'nilspe_bepo_personnel';
-  const RUN_LOCK_KEY = 'nilspe_bepo_personnel_running';
-  const SESSION_RUN_KEY = 'nilspe_bepo_personnel_session';
+
+  let RUN_LOCK_KEY = null;
+  let SESSION_RUN_KEY = null;
 
   const KEYS = {
     targetPersonnel: 'nilspe_bepo_target_personnel',
@@ -38,6 +40,17 @@
   };
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  async function initializeAccountKeys() {
+    if (RUN_LOCK_KEY && SESSION_RUN_KEY) {
+      return;
+    }
+
+    const accountId = await getCurrentAccountId();
+
+    RUN_LOCK_KEY = `nilspe_bepo_personnel_running_${accountId}`;
+    SESSION_RUN_KEY = `nilspe_bepo_personnel_session_${accountId}`;
+  }
 
   function parseJson(value, fallback) {
     try {
@@ -236,23 +249,35 @@
   }
 
   async function stopRun(message = 'Abgebrochen', type = 'danger') {
-    sessionStorage.removeItem(SESSION_RUN_KEY);
-    await GM.deleteValue(RUN_LOCK_KEY);
+    if (SESSION_RUN_KEY) {
+      sessionStorage.removeItem(SESSION_RUN_KEY);
+    }
+
+    if (RUN_LOCK_KEY) {
+      await GM.deleteValue(RUN_LOCK_KEY);
+    }
+
     setProgress(message, 0, 0, type);
   }
 
   function runIsActive() {
-    return sessionStorage.getItem(SESSION_RUN_KEY) === 'true';
+    return SESSION_RUN_KEY !== null &&
+      sessionStorage.getItem(SESSION_RUN_KEY) === 'true';
   }
 
   async function acquireRunLock() {
+    await initializeAccountKeys();
+
     const globalLock = await GM.getValue(RUN_LOCK_KEY, false);
 
     if (globalLock && !runIsActive()) {
-      throw new Error('Der Personalwerber laeuft bereits in einem anderen Tab.');
+      console.warn(
+        '[BePo-Personal-Werber] Verwaister Run-Lock gefunden und entfernt.'
+      );
+      await GM.deleteValue(RUN_LOCK_KEY);
     }
 
-    if (globalLock && runIsActive()) {
+    if (runIsActive()) {
       return false;
     }
 
@@ -542,11 +567,12 @@
   }
 
   async function runRecruiter() {
-    if (!await acquireRunLock()) {
-      return;
-    }
-
     try {
+      if (!await acquireRunLock()) {
+        setProgress('Personalwerber laeuft bereits.', 0, 0, 'warning');
+        return;
+      }
+
       setProgress('Gebaeude werden geladen...');
       const configuration = await loadConfiguration();
 
@@ -693,11 +719,3 @@
 
   addBuildingButtons();
 })();
-
-
-
-
-
-
-
-
