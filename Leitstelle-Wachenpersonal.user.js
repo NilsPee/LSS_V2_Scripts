@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Wachenpersonal
 // @namespace    NilsPe.building.personnel
-// @version      2.0.5
+// @version      2.0.6
 // @description  Setzt Personal-Soll und automatische Personalwerbung fuer konfigurierte Wachen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -459,51 +460,49 @@
       let completed = 0;
       let errors = 0;
       let changes = 0;
-
       let started = 0;
 
-      await Promise.all(jobs.map(async (building, index) => {
-        await sleep(index * requestDelay);
-
-        if (!running) {
-          return;
-        }
-
-        started++;
-        setProgress(
-          `${started}/${jobs.length} gestartet: ${building.caption}`,
-          completed,
-          errors,
-          jobs.length
-        );
-
-        try {
-          changes += await processBuilding(
-            building,
-            targets.get(building.building_type)
+      await runWithConcurrency(
+        jobs,
+        async building => {
+          started++;
+          setProgress(
+            `${started}/${jobs.length} gestartet: ${building.caption}`,
+            completed,
+            errors,
+            jobs.length
           );
-        } catch (error) {
-          errors++;
-          console.error(
-            '[Leitstelle Wachenpersonal] Gebaeude fehlgeschlagen:',
-            building.id,
-            error
+
+          try {
+            const buildingChanges = await processBuilding(
+              building,
+              targets.get(building.building_type)
+            );
+            changes += buildingChanges;
+          } catch (error) {
+            errors++;
+            console.error(
+              '[Leitstelle Wachenpersonal] Gebaeude fehlgeschlagen:',
+              building.id,
+              error
+            );
+          }
+
+          completed++;
+          setProgress(
+            `${completed}/${jobs.length} Gebaeude, ${changes} Aenderungen`,
+            completed,
+            errors,
+            jobs.length,
+            errors ? 'warning' : 'success'
           );
+        },
+        {
+          concurrency: 3,
+          delay: requestDelay,
+          shouldContinue: () => running
         }
-
-        if (!running) {
-          return;
-        }
-
-        completed++;
-        setProgress(
-          `${completed}/${jobs.length} Gebaeude, ${changes} Aenderungen`,
-          completed,
-          errors,
-          jobs.length,
-          errors ? 'warning' : 'success'
-        );
-      }));
+      );
 
       if (!running) {
         return;

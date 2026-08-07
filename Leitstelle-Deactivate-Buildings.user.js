@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Buildings
 // @namespace    NilsPe.activate.buildings
-// @version      1.0.2
+// @version      1.0.3
 // @description  Aktiviert oder deaktiviert konfigurierte Gebaeude einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 

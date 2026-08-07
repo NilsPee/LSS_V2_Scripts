@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Vehicles
 // @namespace    NilsPe.autobuy.vehicles
-// @version      1.2.4
+// @version      1.2.5
 // @description  Kauft konfigurierte Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -675,8 +676,6 @@
 
     async function runForBuildings(buildings) {
       const delays = await configuredDelays();
-
-      // Konfiguration je Gebäudetyp nur einmal laden
       const configurationByBuildingType = new Map();
 
       for (const building of buildings) {
@@ -690,7 +689,6 @@
         }
       }
 
-      // Nur Gebäude behalten, für deren Typ Fahrzeuge konfiguriert sind
       const configuredBuildings = buildings.filter(building => {
         const configuration = configurationByBuildingType.get(
           Number(building.building_type)
@@ -721,46 +719,49 @@
       let errors = 0;
       let totalBought = 0;
 
-      for (const building of configuredBuildings) {
-        setProgress(
-          `${completed}/${configuredBuildings.length}: ${building.caption}`,
-          completed,
-          configuredBuildings.length
-        );
-
-        try {
-          const configuration = configurationByBuildingType.get(
-            Number(building.building_type)
+      await runWithConcurrency(
+        configuredBuildings,
+        async building => {
+          setProgress(
+            `${completed}/${configuredBuildings.length}: ${building.caption}`,
+            completed,
+            configuredBuildings.length
           );
 
-          totalBought += await processBuilding(
-            building,
-            counts,
-            delays.vehicle,
-            configuration
+          try {
+            const configuration = configurationByBuildingType.get(
+              Number(building.building_type)
+            );
+
+            const bought = await processBuilding(
+              building,
+              counts,
+              delays.vehicle,
+              configuration
+            );
+            totalBought += bought;
+          } catch (error) {
+            errors++;
+
+            console.error(
+              '[Autobuy Vehicles] Fehler bei Gebaeude',
+              building.id,
+              building.caption,
+              error
+            );
+          }
+
+          completed++;
+
+          setProgress(
+            `${completed}/${configuredBuildings.length} Gebaeude, ${totalBought} gekauft`,
+            completed,
+            configuredBuildings.length,
+            errors ? 'warning' : 'success'
           );
-        } catch (error) {
-          errors++;
-
-          console.error(
-            '[Autobuy Vehicles] Fehler bei Gebaeude',
-            building.id,
-            building.caption,
-            error
-          );
-        }
-
-        completed++;
-
-        setProgress(
-          `${completed}/${configuredBuildings.length} Gebaeude, ${totalBought} gekauft`,
-          completed,
-          configuredBuildings.length,
-          errors ? 'warning' : 'success'
-        );
-
-        await sleep(delays.building);
-      }
+        },
+        { concurrency: 2, delay: delays.building }
+      );
 
       setProgress(
         `Fertig: ${totalBought} Fahrzeuge gekauft, ${errors} Fehler`,

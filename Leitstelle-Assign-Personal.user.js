@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Assign Personal
 // @namespace    NilsPe.assign.personal
-// @version      1.0.4
+// @version      1.0.5
 // @description  Weist den Fahrzeugen eines Gebaeudes automatisch die konfigurierte Besatzung zu
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -500,39 +501,46 @@
       let errors = 0;
       let shortages = 0;
 
-      for (const job of jobs) {
-        if (!running) {
-          return;
-        }
+      await runWithConcurrency(
+        jobs,
+        async job => {
+          try {
+            const assigned = await adjustVehicle(job, configuration);
 
-        setProgress(
-          `${completed}/${jobs.length} Fahrzeuge bearbeitet`,
-          completed,
-          jobs.length
-        );
-
-        try {
-          const assigned = await adjustVehicle(job, configuration);
-
-          if (assigned < job.target) {
-            shortages++;
-            console.warn(
-              '[Leitstelle Assign Personal] Nicht genug passendes Personal:',
+            if (assigned < job.target) {
+              shortages++;
+              console.warn(
+                '[Leitstelle Assign Personal] Nicht genug passendes Personal:',
+                job.vehicleId,
+                `${assigned}/${job.target}`
+              );
+            }
+          } catch (error) {
+            errors++;
+            console.error(
+              '[Leitstelle Assign Personal] Fahrzeug fehlgeschlagen:',
               job.vehicleId,
-              `${assigned}/${job.target}`
+              error
             );
           }
-        } catch (error) {
-          errors++;
-          console.error(
-            '[Leitstelle Assign Personal] Fahrzeug fehlgeschlagen:',
-            job.vehicleId,
-            error
-          );
-        }
 
-        completed++;
-        await sleep(configuration.vehicleDelay);
+          completed++;
+          setProgress(
+            `${completed}/${jobs.length} Fahrzeuge bearbeitet`,
+            completed,
+            jobs.length,
+            errors || shortages ? 'warning' : 'info'
+          );
+        },
+        {
+          concurrency: 3,
+          delay: configuration.vehicleDelay,
+          shouldContinue: () => running
+        }
+      );
+
+      if (!running) {
+        return;
       }
 
       setProgress(

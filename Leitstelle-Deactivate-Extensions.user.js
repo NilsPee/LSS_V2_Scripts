@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Extensions
 // @namespace    NilsPe.activate.extensions
-// @version      1.0.1
+// @version      1.0.2
 // @description  Aktiviert oder deaktiviert konfigurierte Erweiterungen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -14,7 +14,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
-// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.12
+// @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -502,9 +503,15 @@
     errorBar.style.width = `${errors / safeTotal * 100}%`;
   }
 
-  async function configurationFor(building, desiredState) {
+  async function configurationFor(
+    building,
+    desiredState,
+    selectedExtensionIds = null
+  ) {
     const prefix = desiredState ? ACTIVATE_PREFIX : DEACTIVATE_PREFIX;
-    const selected = new Set(await selectedIds(prefix, building.building_type));
+    const selected = selectedExtensionIds ?? new Set(
+      await selectedIds(prefix, building.building_type)
+    );
 
     return building.extensions.filter(extension =>
       selected.has(extension.type_id) &&
@@ -513,8 +520,14 @@
     );
   }
 
-  async function processBuilding(building, desiredState, actionDelay) {
-    const extensions = await configurationFor(building, desiredState);
+  async function processBuilding(
+    building,
+    desiredState,
+    actionDelay,
+    configuredExtensions = null
+  ) {
+    const extensions = configuredExtensions ??
+      await configurationFor(building, desiredState);
 
     if (extensions.length === 0) {
       return 0;
@@ -569,11 +582,31 @@
       );
       setProgress('Gebaeude werden geladen ...');
       const buildings = await loadBuildings(dispatchCenterId);
+      const prefix = desiredState ? ACTIVATE_PREFIX : DEACTIVATE_PREFIX;
+      const selectedByBuildingType = new Map();
+
+      for (const building of buildings) {
+        const buildingType = Number(building.building_type);
+
+        if (!selectedByBuildingType.has(buildingType)) {
+          selectedByBuildingType.set(
+            buildingType,
+            new Set(await selectedIds(prefix, buildingType))
+          );
+        }
+      }
+
       const relevant = [];
 
       for (const building of buildings) {
-        if ((await configurationFor(building, desiredState)).length > 0) {
-          relevant.push(building);
+        const extensions = await configurationFor(
+          building,
+          desiredState,
+          selectedByBuildingType.get(Number(building.building_type))
+        );
+
+        if (extensions.length > 0) {
+          relevant.push({ building, extensions });
         }
       }
 
@@ -586,42 +619,51 @@
       let errors = 0;
       let changed = 0;
 
-      for (const building of relevant) {
-        if (!running) {
-          return;
-        }
-
-        setProgress(
-          `${completed}/${relevant.length}: ${building.caption}`,
-          completed,
-          errors,
-          relevant.length
-        );
-
-        try {
-          changed += await processBuilding(
-            building,
-            desiredState,
-            actionDelay
+      await runWithConcurrency(
+        relevant,
+        async ({ building, extensions }) => {
+          setProgress(
+            `${completed}/${relevant.length}: ${building.caption}`,
+            completed,
+            errors,
+            relevant.length
           );
-        } catch (error) {
-          errors++;
-          console.error(
-            '[De-/Activate Extensions] Gebaeude fehlgeschlagen:',
-            building.id,
-            error
-          );
-        }
 
-        completed++;
-        setProgress(
-          `${completed}/${relevant.length} Gebaeude, ${changed} umgeschaltet`,
-          completed,
-          errors,
-          relevant.length,
-          errors ? 'warning' : 'success'
-        );
-        await sleep(buildingDelay);
+          try {
+            const buildingChanges = await processBuilding(
+              building,
+              desiredState,
+              actionDelay,
+              extensions
+            );
+            changed += buildingChanges;
+          } catch (error) {
+            errors++;
+            console.error(
+              '[De-/Activate Extensions] Gebaeude fehlgeschlagen:',
+              building.id,
+              error
+            );
+          }
+
+          completed++;
+          setProgress(
+            `${completed}/${relevant.length} Gebaeude, ${changed} umgeschaltet`,
+            completed,
+            errors,
+            relevant.length,
+            errors ? 'warning' : 'success'
+          );
+        },
+        {
+          concurrency: 3,
+          delay: buildingDelay,
+          shouldContinue: () => running
+        }
+      );
+
+      if (!running) {
+        return;
       }
 
       setProgress(
