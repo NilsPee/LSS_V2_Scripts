@@ -1,14 +1,10 @@
 // ==UserScript==
-// @name            [LSS] Own alliance mission count
-// @name:de         [LSS] Freigabenzaehler NilsPe
-// @namespace       https://jxn.lss-manager.de
-// @version         2026.8.7
+// @name            [LSS] Freigabenzaehler NilsPe
+// @version         2.0.1
 // @license         MIT
-// @author          Jan (jxn_30) & NilsPe
-// @description     Adds configurable counters above the mission list.
-// @description:de  Zeigt konfigurierbare Zaehler oberhalb der Einsatzliste.
+// @author          NilsPe
+// @description     Zeigt konfigurierbare Zaehler oberhalb der Einsatzliste.
 // @homepageURL     https://github.com/NilsPee/LSS_V2_Scripts
-// @source          https://github.com/jxn-30/LSS-Scripts
 // @supportURL      https://github.com/NilsPee/LSS_V2_Scripts/issues
 // @downloadURL     https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Own-Alliance-Mission-Count.user.js
 // @updateURL       https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Own-Alliance-Mission-Count.user.js
