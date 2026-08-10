@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name            [LSS] Freigabenzaehler NilsPe
+// @name            LSS Freigabenzaehler NilsPe
 // @version         2.0.1
 // @license         MIT
 // @author          NilsPe
