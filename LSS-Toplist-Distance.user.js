@@ -3,11 +3,9 @@
 // @namespace       NilsPe.lss.toplist.distance
 // @version         2.0.1
 // @license         MIT
-// @author          Jan (jxn_30) & NilsPe
-// @description     Shows credit differences and a bounded history chart on the toplist.
-// @description:de  Zeigt Credit-Abstaende und einen begrenzten Verlauf in der Topliste.
+// @author          NilsPe
+// @description     Zeigt Credit-Abstaende und einen begrenzten Verlauf in der Topliste.
 // @homepageURL     https://github.com/NilsPee/LSS_V2_Scripts
-// @source          https://github.com/jxn-30/LSS-Scripts
 // @supportURL      https://github.com/NilsPee/LSS_V2_Scripts/issues
 // @downloadURL     https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Toplist-Distance.user.js
 // @updateURL       https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Toplist-Distance.user.js
