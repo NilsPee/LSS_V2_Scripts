@@ -72,7 +72,6 @@ Das Skript fuellt die Zielwachen bis zum eingestellten Personalwert auf. Fuer
 Quellwachen koennen Mindestpersonalwerte festgelegt werden. Einzelne Quell- und
 Zielwachen sowie komplette Leitstellen lassen sich ein- oder ausschliessen.
 
-
 ## Leitstelle-Pol-Werber
 
 **Datei:** `Leitstelle-Pol-Werber.user.js`
@@ -94,6 +93,22 @@ Fuer jeden Fahrzeugtyp kann eine Zielbesatzung eingestellt werden. Das Skript
 prueft die benoetigte Ausbildung und weist nur geeignetes Personal zu.
 Fahrzeuge, die bereits mindestens die Zielbesatzung besitzen, koennen
 uebersprungen werden.
+
+## Leitstelle Assign Trailer
+
+**Datei:** `Leitstelle-Assign-Trailer.user.js`
+
+Weist Anhaenger im Fahrzeug-Tab einer Leitstelle automatisch passenden
+Zugfahrzeugen derselben Wache zu.
+
+Fuer unterstuetzte Anhaengertypen aus Feuerwehr, SEG, Bereitschaftspolizei und
+THW kann jeweils ein zulaessiger Zugfahrzeugtyp ausgewaehlt werden. Ist fuer
+einen Anhaengertyp kein Zugfahrzeug ausgewaehlt, wird dieser Typ uebersprungen.
+
+Die Fahrzeuge werden direkt aus der sichtbaren Fahrzeugtabelle ermittelt.
+Vor einer neuen Zuweisung prueft das Skript die Bearbeitungsseite des
+jeweiligen Anhaengers. Bereits fest zugewiesene Anhaenger werden uebersprungen,
+damit vorhandene Gespanne nicht veraendert werden.
 
 ## Leitstelle Besatzungs-Checker
 
@@ -160,7 +175,6 @@ Die zu bearbeitenden Fahrzeugtypen werden in den Einstellungen festgelegt.
 Beim Setzen auf Status 6 kann je Fahrzeugtyp und Wache eine bestimmte Anzahl
 von Fahrzeugen in Status 2 verbleiben.
 
-
 ## Leitstelle Fahrzeug Max-Personal
 
 **Datei:** `Leitstelle-Vehicle-Max-Personal.user.js`
@@ -171,6 +185,58 @@ einzelnes Gebaeude oder fuer die Gebaeude einer Leitstelle.
 Die Zielwerte werden nach Fahrzeugtyp festgelegt. Das Skript prueft die
 sichtbare Fahrzeugtabelle und aendert nur Fahrzeuge, deren aktueller Wert vom
 konfigurierten Maximum abweicht.
+
+## Leitstelle Move Buildings
+
+**Datei:** `Leitstelle-Move-Buildings.user.js`
+
+Verschiebt ausgewaehlte Wachen einer Leitstelle gesammelt in eine andere
+Leitstelle.
+
+In den Einstellungen werden die Ziel-Leitstelle und ein Namensfilter
+festgelegt. Es werden nur Wachen der aktuell geoeffneten Leitstelle
+verschoben, deren Name den angegebenen Text enthaelt.
+
+Vor dem Verschieben kann eine Bestaetigung mit einer Vorschau der gefundenen
+Wachen angezeigt werden. Zusaetzlich steht ein Testlauf zur Verfuegung, bei
+dem die Auswahl geprueft wird, ohne die Wachen tatsaechlich zu verschieben.
+
+Die Verschiebungen koennen mit konfigurierbarer Parallelitaet und Pause
+zwischen den Anfragen ausgefuehrt werden.
+
+## Leitstelle Rename Buildings
+
+**Datei:** `Leitstelle-Rename-Buildings.user.js`
+
+Benennt die Gebaeude einer Leitstelle nach einem einheitlichen Schema um.
+
+Fuer jeden unterstuetzten Gebaeudetyp kann eine eigene Bezeichnung festgelegt
+werden. Zusaetzlich wird ein Namens-Suffix, beispielsweise ein Gebiets- oder
+Stadtname, festgelegt. Die Gebaeude werden aufsteigend nach ihrer Gebaeude-ID
+nummeriert.
+
+Das Namensschema lautet:
+
+`Wachentyp Namens-Suffix Nummer`
+
+Beispiel:
+
+`Bepol Berlin 001`
+
+Fuer die Nummerierung kann festgelegt werden, ob beispielsweise mit `0`, `00`
+oder `000` aufgefuellt werden soll.
+
+## Leitstelle Share Buildings
+
+**Datei:** `Leitstelle-Share-Buildings.user.js`
+
+Gibt ausgewaehlte Gebaeude einer Leitstelle fuer den Verband frei oder nimmt
+bestehende Freigaben wieder zurueck.
+
+Die zu bearbeitenden Gebaeudetypen werden in den Einstellungen festgelegt.
+Ueber die Leitstelle koennen dadurch viele passende Gebaeude gesammelt
+freigegeben werden. Optional steht eine Schaltflaeche zum Zuruecknehmen der
+Freigaben zur Verfuegung.
 
 ## Leitstelle Wachenpersonal
 
@@ -200,6 +266,20 @@ festlegen.
 Vereinfacht das Erstellen und Befuellen vieler Lehrgaenge. Schul- und
 Gebaeudedaten werden ueber den gemeinsamen API-Cache geladen; unabhaengige
 Raumaktionen laufen mit begrenzter Parallelitaet.
+
+## Personnel Selector
+
+**Datei:** `Personnel-Selector.user.js`
+
+Erweitert die Personaluebernahme zwischen Gebaeuden um eine schnelle Auswahl
+bestimmter Personalmengen.
+
+Fuer die angezeigten Quellwachen stehen Schaltflaechen zur Auswahl bestimmter
+Personalmengen zur Verfuegung. Das Personal kann nach Ausbildung gefiltert
+werden. Dabei wird nur ungebundenes Personal ausgewaehlt.
+
+Die aktuelle Auswahl wird angezeigt und kann ueber die Zuruecksetzen-
+Schaltflaeche wieder aufgehoben werden.
 
 ## LSS Freigabenzaehler
 
@@ -246,4 +326,3 @@ Tasten `A` und `D` beziehungsweise die Pfeiltasten wechseln zum vorherigen
 oder naechsten Eintrag. Auf Gebaeudeseiten oeffnet `W` den mittleren Link und
 `S` den Fahrzeugkauf. In Eingabefeldern und im geoeffneten Baumeister sind
 die Hotkeys deaktiviert.
-
