@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle-Bepo-Werber
 // @namespace    NilsPe.bepo.personnel
-// @version      1.0.12
+// @version      1.0.14
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf BePo-Zielwachen
 // @author       NilsPe
 // @license      MIT
@@ -84,7 +84,7 @@
     if (typeof addOptions !== 'function') {
       const warning = document.createElement('div');
       warning.className = 'alert alert-danger';
-      warning.textContent = 'BePo-Personal-Werber: NilsPe-Skriptbasis fehlt.';
+      warning.textContent = 'Leitstelle-Bepo-Werber: NilsPe-Skriptbasis fehlt.';
       (document.querySelector('.container') ?? document.body).prepend(warning);
       return;
     }
@@ -282,7 +282,7 @@
 
     if (globalLock && !runIsActive()) {
       console.warn(
-        '[BePo-Personal-Werber] Verwaister Run-Lock gefunden und entfernt.'
+        '[Leitstelle-Bepo-Werber] Verwaister Run-Lock gefunden und entfernt.'
       );
       await GM.deleteValue(RUN_LOCK_KEY);
     }
@@ -493,11 +493,6 @@
     return personnelIds;
   }
 
-  // ============================================================
-  // FIX 1:
-  // Alle Personalzeilen zählen, nicht nur Checkboxen.
-  // ============================================================
-
   function personnelCountFromDocument(
     documentFromResponse,
     buildingId
@@ -567,10 +562,7 @@
         Number.isInteger(liveCount)
       ) {
         target.personal_count =
-          Math.max(
-            target.personal_count,
-            liveCount
-          );
+          liveCount;
 
         target.needed =
           Math.max(
@@ -582,7 +574,7 @@
 
     } catch (error) {
       console.warn(
-        '[BePo-Personal-Werber] Ziel-Personalzaehlung fehlgeschlagen:',
+        '[Leitstelle-Bepo-Werber] Ziel-Personalzaehlung fehlgeschlagen:',
         target.id,
         error
       );
@@ -590,20 +582,6 @@
 
     return target.needed;
   }
-
-  // ============================================================
-  // FIX 2:
-  // source.available enthält die Reserve bereits.
-  // Daher NICHT nochmal:
-  //
-  // livePersonnel - sourceBuilding.reserve
-  //
-  // rechnen.
-  //
-  // Wir begrenzen nur noch auf:
-  // - verfügbare Menge laut Gebäude-Cache
-  // - tatsächlich vorhandene, unausgebildete Checkboxen
-  // ============================================================
 
   async function availablePersonnelIds(
     sourceBuilding
@@ -644,9 +622,38 @@
         sourceBuilding.id
       );
 
+    const liveCount =
+      personnelCountFromDocument(
+        documentFromResponse,
+        sourceBuilding.id
+      );
+
+    const liveAvailable =
+      Number.isInteger(liveCount)
+        ? Math.max(
+          liveCount -
+            sourceBuilding.reserve,
+          0
+        )
+        : sourceBuilding.available;
+
+    if (
+      Number.isInteger(liveCount)
+    ) {
+      sourceBuilding.personal_count =
+        liveCount;
+
+      sourceBuilding.available =
+        Math.min(
+          sourceBuilding.available,
+          liveAvailable
+        );
+    }
+
     const allowed =
       Math.min(
         sourceBuilding.available,
+        liveAvailable,
         personnelIds.length
       );
 
@@ -725,6 +732,76 @@
       throw new Error(
         `Personaluebernahme HTTP ${response.status}`
       );
+    }
+  }
+
+  function syncSourceEntryForTarget(
+    sources,
+    target
+  ) {
+    const sourceEntry =
+      sources.find(source =>
+        source.id === target.id
+      );
+
+    if (!sourceEntry) {
+      return;
+    }
+
+    sourceEntry.personal_count =
+      target.personal_count;
+
+    sourceEntry.available =
+      Math.max(
+        sourceEntry.personal_count -
+          sourceEntry.reserve,
+        0
+      );
+  }
+
+  function applySuccessfulTransfer(
+    target,
+    sources,
+    selections,
+    transferred
+  ) {
+    target.personal_count +=
+      transferred;
+
+    target.needed =
+      Math.max(
+        target.needed - transferred,
+        0
+      );
+
+    syncSourceEntryForTarget(
+      sources,
+      target
+    );
+
+    for (
+      const {
+        source,
+        ids
+      }
+      of selections
+    ) {
+      source.personal_count =
+        Math.max(
+          source.personal_count -
+            ids.length,
+          0
+        );
+
+      source.available =
+        Math.max(
+          Math.min(
+            source.available,
+            source.personal_count -
+              source.reserve
+          ),
+          0
+        );
     }
   }
 
@@ -820,7 +897,7 @@
 
       } catch (error) {
         console.warn(
-          '[BePo-Personal-Werber] Quelle uebersprungen:',
+          '[Leitstelle-Bepo-Werber] Quelle uebersprungen:',
           error
         );
       }
@@ -865,6 +942,13 @@
 
       throw error;
     }
+
+    applySuccessfulTransfer(
+      target,
+      sources,
+      selections,
+      selectedPersonnel.length
+    );
 
     return selectedPersonnel.length;
   }
@@ -981,6 +1065,11 @@
             configuration
           );
 
+          syncSourceEntryForTarget(
+            sources,
+            target
+          );
+
           if (
             target.needed <= 0
           ) {
@@ -1010,7 +1099,7 @@
           errors++;
 
           console.error(
-            '[BePo-Personal-Werber] Zielwache fehlgeschlagen:',
+            '[Leitstelle-Bepo-Werber] Zielwache fehlgeschlagen:',
             target.id,
             error
           );
@@ -1037,7 +1126,7 @@
 
     } catch (error) {
       console.error(
-        '[BePo-Personal-Werber] Lauf fehlgeschlagen:',
+        '[Leitstelle-Bepo-Werber] Lauf fehlgeschlagen:',
         error
       );
 
