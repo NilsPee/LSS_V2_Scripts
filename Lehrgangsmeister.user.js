@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Lehrgangsmeister
 // @namespace       NilsPe.lehrgangsmeister
-// @version         1.1.1
+// @version         1.1.2
 // @license         MIT
 // @author          NilsPe
 // @description     Reduziert die notwendigen Klicks beim Ausbilden grosser Personalmengen.
@@ -663,7 +663,9 @@ const loadCachedBuildings = async (storeName, update) => {
     const db = await openDb();
 
     try {
-        await update(db, 60);
+        // Lehrgaenge veraendern die Raumbelegung sofort. Deshalb bei jedem
+        // Laden inkrementell nach geaenderten Gebaeuden fragen.
+        await update(db, 0);
         return await getAllData(db, storeName);
     } finally {
         db.close();
@@ -675,6 +677,20 @@ const fetchGameBuildings = () =>
 
 const fetchAllianceBuildings = () =>
     loadCachedBuildings('allianceBuildings', updateAllianceBuildings);
+
+const persistSchoolState = async school => {
+    const db = await openDb();
+
+    try {
+        await putRecords(
+            db,
+            isAllianceSchool ? 'allianceBuildings' : 'buildings',
+            [school]
+        );
+    } finally {
+        db.close();
+    }
+};
 
 let schoolsLoaded = false;
 let schoolsLoading = false;
@@ -1835,14 +1851,6 @@ const loadSchools = () =>
                 schoolUrl.searchParams.append('personal_ids[]', id)
             );
             schoolUrl.searchParams.set('commit', 'Ausbilden');
-            const school = schools.find(
-                s => s.id.toString() === schoolId.toString()
-            );
-            if (school) {
-                school.schoolings ??= [];
-                for (let i = 0; i < rooms; i++)
-                    school.schoolings.push(undefined);
-            }
             return fetch(`/buildings/${schoolId}/education`, {
                 credentials: 'include',
                 headers: {
@@ -1852,6 +1860,25 @@ const loadSchools = () =>
                 body: schoolUrl.search.replace(/^\?/, ''),
                 method: 'POST',
                 mode: 'cors',
+            }).then(async response => {
+                if (!response.ok) {
+                    throw new Error(
+                        `${response.status} ${response.statusText}`
+                    );
+                }
+
+                const school = schools.find(
+                    s => s.id.toString() === schoolId.toString()
+                );
+                if (school) {
+                    school.schoolings ??= [];
+                    for (let i = 0; i < rooms; i++) {
+                        school.schoolings.push(undefined);
+                    }
+                    await persistSchoolState(school);
+                }
+
+                return response;
             });
         };
 
