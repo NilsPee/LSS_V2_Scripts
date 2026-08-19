@@ -1,0 +1,187 @@
+// ==UserScript==
+// @name         Leitstelle Quick Settings
+// @namespace    NilsPe.leitstelle.quick.settings
+// @version      1.0.8
+// @description  Zeigt wichtige Leitstellen-Einstellungen direkt auf der Leitstellen-Hauptseite an
+// @author       NilsPe
+// @license      MIT
+// @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
+// @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
+// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Quick-Settings.user.js
+// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Quick-Settings.user.js
+// @match        https://*.leitstellenspiel.de/buildings/*
+// @grant        none
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
+// @run-at       document-idle
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const PANEL_ID = 'nilspe-leitstelle-quick-settings';
+  const FIELD_ACTIVE = 'building[active]';
+  const FIELD_OWN_MISSIONS = 'building[generate_own_missions]';
+
+  const pathMatch = location.pathname.match(/^\/buildings\/(\d+)\/?$/);
+
+  if (!pathMatch || document.getElementById(PANEL_ID)) {
+    return;
+  }
+
+  const buildingId = pathMatch[1];
+  const editUrl = `${location.origin}/buildings/${buildingId}/edit`;
+
+  init().catch(error => {
+    console.error('[Leitstelle Quick Settings]', error);
+  });
+
+  async function init() {
+    const heading = document.querySelector('h1[building_type]');
+
+    if (Number(heading?.getAttribute('building_type')) !== 7) {
+      return;
+    }
+
+    const editDocument = await fetchEditDocument();
+    const editForm = findSettingsForm(editDocument);
+
+    if (!editForm) {
+      return;
+    }
+
+    const activeCheckbox = editForm.querySelector(`input[type="checkbox"][name="${FIELD_ACTIVE}"]`);
+    const ownMissionsCheckbox = editForm.querySelector(`input[type="checkbox"][name="${FIELD_OWN_MISSIONS}"]`);
+
+    if (!activeCheckbox || !ownMissionsCheckbox) {
+      return;
+    }
+
+    const row = createSettingsRow({
+      dispatchDisabled: activeCheckbox.checked,
+      ownMissions: ownMissionsCheckbox.checked
+    });
+
+    insertSettingsRow(row);
+
+    row.description.querySelector('form').addEventListener('submit', event => {
+      event.preventDefault();
+      saveSettings(editForm, row);
+    });
+  }
+
+  async function fetchEditDocument() {
+    const response = await fetch(editUrl, {
+      credentials: 'same-origin',
+      headers: { Accept: 'text/html' }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Edit-Seite konnte nicht geladen werden (${response.status}).`);
+    }
+
+    const html = await response.text();
+    return new DOMParser().parseFromString(html, 'text/html');
+  }
+
+  function findSettingsForm(editDocument) {
+    return Array.from(editDocument.forms).find(form =>
+      form.querySelector(`[name="${FIELD_ACTIVE}"]`) &&
+      form.querySelector(`[name="${FIELD_OWN_MISSIONS}"]`) &&
+      form.querySelector('[name="commit"], input[type="submit"]')
+    );
+  }
+
+  function createSettingsRow(values) {
+    const term = document.createElement('dt');
+    const strong = document.createElement('strong');
+    strong.textContent = 'Leitstelle:';
+    term.append(strong);
+
+    const description = document.createElement('dd');
+    description.id = PANEL_ID;
+    description.innerHTML = `
+      <form style="display:inline-flex;flex-direction:column;gap:3px;margin:0;">
+        <label for="nilspe-lqs-active" style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+          <input id="nilspe-lqs-active" type="checkbox" name="quick_active" style="width:13px;height:13px;margin:0;">
+          <span>LS deaktivieren</span>
+        </label>
+        <label for="nilspe-lqs-own-missions" style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+          <input id="nilspe-lqs-own-missions" type="checkbox" name="quick_own_missions" style="width:13px;height:13px;margin:0;">
+          <span>Eigener Einsatzbereich</span>
+        </label>
+        <button class="btn btn-success btn-xs" type="submit" style="align-self:flex-start;">Speichern</button>
+        <span class="text-success hidden" data-quick-success style="margin-left:4px;"></span>
+        <span class="text-danger hidden" data-quick-error style="margin-left:4px;"></span>
+      </form>
+    `;
+
+    description.querySelector('[name="quick_active"]').checked = values.dispatchDisabled;
+    description.querySelector('[name="quick_own_missions"]').checked = values.ownMissions;
+
+    return { term, description };
+  }
+
+  function insertSettingsRow(row) {
+    const details = document.querySelector('.building-title ~ dl.dl-horizontal');
+
+    if (details) {
+      details.append(row.term, row.description);
+      return;
+    }
+
+    const tabs = document.querySelector('ul.nav-tabs, .nav-tabs');
+
+    if (tabs?.parentNode) {
+      tabs.parentNode.insertBefore(row.description, tabs);
+    }
+  }
+
+  async function saveSettings(editForm, row) {
+    const controls = row.description;
+    const submitButton = controls.querySelector('button[type="submit"]');
+    const successAlert = controls.querySelector('[data-quick-success]');
+    const errorAlert = controls.querySelector('[data-quick-error]');
+    const dispatchDisabled = controls.querySelector('[name="quick_active"]').checked;
+    const ownMissions = controls.querySelector('[name="quick_own_missions"]').checked;
+
+    setAlert(successAlert, '');
+    setAlert(errorAlert, '');
+    submitButton.disabled = true;
+    submitButton.textContent = 'Speichern...';
+
+    try {
+      editForm.querySelector(`input[type="checkbox"][name="${FIELD_ACTIVE}"]`).checked = dispatchDisabled;
+      editForm.querySelector(`input[type="checkbox"][name="${FIELD_OWN_MISSIONS}"]`).checked = ownMissions;
+
+      const action = new URL(editForm.getAttribute('action') || location.pathname, location.origin);
+      const method = (editForm.getAttribute('method') || 'post').toUpperCase();
+      const response = await fetch(action.href, {
+        method,
+        credentials: 'same-origin',
+        body: new FormData(editForm),
+        headers: {
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        },
+        redirect: 'follow'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Speichern fehlgeschlagen (${response.status}).`);
+      }
+
+      setAlert(successAlert, 'Gespeichert.');
+      window.setTimeout(() => location.reload(), 700);
+    } catch (error) {
+      console.error('[Leitstelle Quick Settings]', error);
+      setAlert(errorAlert, error.message || 'Speichern fehlgeschlagen.');
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Speichern';
+    }
+  }
+
+  function setAlert(element, message) {
+    element.textContent = message;
+    element.classList.toggle('hidden', !message);
+  }
+})();
