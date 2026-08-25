@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeug Max-Personal
 // @namespace    NilsPe.vehicle.maxpersonal
-// @version      1.0.3
+// @version      1.0.4
 // @description  Setzt die maximale Personenanzahl konfigurierter Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -418,7 +418,18 @@
 
     if (Number.isInteger(directValue)) return directValue;
 
-    const cell = row.querySelector('td:nth-child(6)');
+    const table = row.closest('table') ?? document.getElementById('vehicle_table');
+    const headers = Array.from(table?.querySelectorAll('thead th') ?? []);
+    const columnIndex = headers.findIndex(header => {
+      const text = header.textContent ?? '';
+      const label = header.getAttribute('aria-label') ?? '';
+      return /besatzung\s*\(maximal\)/i.test(text) ||
+        /besatzung\s*\(maximal\)/i.test(label);
+    });
+
+    const cell = columnIndex >= 0
+      ? row.children[columnIndex]
+      : row.querySelector('td:nth-child(5)');
     const match = cell?.textContent?.match(/\d+/);
     return match ? Number(match[0]) : null;
   }
