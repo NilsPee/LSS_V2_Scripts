@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Lehrgangsmeister
 // @namespace       NilsPe.lehrgangsmeister
-// @version         1.1.4
+// @version         1.1.5
 // @license         MIT
 // @author          NilsPe
 // @description     Reduziert die notwendigen Klicks beim Ausbilden grosser Personalmengen.
@@ -858,6 +858,21 @@ const parseEducationCountersFromScript = script => {
             ]),
     };
 };
+
+const parseRenderedEducationCounters = span => {
+    const count = selector =>
+        Math.max(
+            0,
+            ...Array.from(span?.querySelectorAll(selector) ?? []).map(label =>
+                parseInt(label.textContent?.match(/\d+/)?.[0] ?? '0', 10) || 0
+            )
+        );
+    return {
+        educated: count('.label-success'),
+        inTraining: count('.label-info'),
+    };
+};
+
 const storeEducationCounterDataset = (buildingId, counters) => {
     const span = getEducationCounterSpan(buildingId);
     if (!span) return;
@@ -883,7 +898,18 @@ const loadEducationCounterForBuilding = async buildingId => {
         );
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         const script = await res.text();
-        const parsedCounters = parseEducationCountersFromScript(script);
+        let parsedCounters;
+        try {
+            // The game returns JavaScript which renders the exact counters.
+            unsafeWindow.eval(script);
+            parsedCounters = parseRenderedEducationCounters(span);
+        } catch (executionError) {
+            console.warn(
+                'Lehrgangsmeister: Schulungszaehler konnte nicht direkt ausgefuehrt werden.',
+                executionError
+            );
+            parsedCounters = parseEducationCountersFromScript(script);
+        }
         span.dataset.educationLoaded = eduField.value;
         span.dataset.educatedCount = (parsedCounters.educated || 0).toString();
         span.dataset.inTrainingCount = (parsedCounters.inTraining || 0).toString();
