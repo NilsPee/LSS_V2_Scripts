@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Lehrgangsmeister
 // @namespace       NilsPe.lehrgangsmeister
-// @version         1.1.2
+// @version         1.1.4
 // @license         MIT
 // @author          NilsPe
 // @description     Reduziert die notwendigen Klicks beim Ausbilden grosser Personalmengen.
@@ -770,7 +770,13 @@ const getCoveredPersonnelCounterFromHeading = buildingId => {
     const datasetCounter =
         (parseInt(span?.dataset.educatedCount ?? '0', 10) || 0) +
         (parseInt(span?.dataset.inTrainingCount ?? '0', 10) || 0);
-    if (datasetCounter > 0) return datasetCounter;
+
+    if (
+        span?.dataset.educationLoaded === eduField.value ||
+        span?.dataset.educationCounterKnown === 'true'
+    ) {
+        return datasetCounter;
+    }
 
     const heading = document.querySelector(
         `.personal-select-heading[building_id="${buildingId}"]`
@@ -786,7 +792,6 @@ const getCoveredPersonnelCounterFromHeading = buildingId => {
         0
     );
 };
-
 const decodeCounterScriptText = script =>
     script
         .replace(/\\u([0-9a-f]{4})/gi, (_, hex) =>
@@ -808,6 +813,23 @@ const decodeCounterScriptText = script =>
 
 const parseEducationCountersFromScript = script => {
     const text = decodeCounterScriptText(script);
+    const html = script
+        .replace(/\\u([0-9a-f]{4})/gi, (_, hex) =>
+            String.fromCharCode(parseInt(hex, 16))
+        )
+        .replace(/\\x([0-9a-f]{2})/gi, (_, hex) =>
+            String.fromCharCode(parseInt(hex, 16))
+        )
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'");
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const countFromLabels = selector =>
+        Math.max(
+            0,
+            ...Array.from(doc.querySelectorAll(selector)).map(label =>
+                parseInt(label.textContent?.match(/\d+/)?.[0] ?? '0', 10) || 0
+            )
+        );
     const count = patterns => {
         const values = [];
         patterns.forEach(pattern => {
@@ -817,20 +839,25 @@ const parseEducationCountersFromScript = script => {
         });
         return values.length ? Math.max(...values) : 0;
     };
+    const educatedFromLabels = countFromLabels('.label-success');
+    const inTrainingFromLabels = countFromLabels('.label-info');
     return {
-        educated: count([
-            /(\d+)\s+(?:bereits\s+)?ausgebildete(?:\s+Person(?:en)?)?/gi,
-            /ausgebildete(?:\s+Person(?:en)?)?\s*:?\s*(\d+)/gi,
-            /(\d+)\s+Person(?:en)?\s+ausgebildet/gi,
-        ]),
-        inTraining: count([
-            /(\d+)\s+(?:Person(?:en)?\s+)?in\s+Ausbildung/gi,
-            /in\s+Ausbildung\s*:?\s*(\d+)/gi,
-            /(\d+)\s+laufende(?:\s+Ausbildung(?:en)?)?/gi,
-        ]),
+        educated:
+            educatedFromLabels ||
+            count([
+                /(\d+)\s+(?:bereits\s+)?ausgebildete(?:\s+Person(?:en)?)?/gi,
+                /ausgebildete(?:\s+Person(?:en)?)?\s*:?\s*(\d+)/gi,
+                /(\d+)\s+Person(?:en)?\s+ausgebildet/gi,
+            ]),
+        inTraining:
+            inTrainingFromLabels ||
+            count([
+                /(\d+)\s+(?:Person(?:en)?\s+)?in\s+Ausbildung/gi,
+                /in\s+Ausbildung\s*:?\s*(\d+)/gi,
+                /(\d+)\s+laufende(?:\s+Ausbildung(?:en)?)?/gi,
+            ]),
     };
 };
-
 const storeEducationCounterDataset = (buildingId, counters) => {
     const span = getEducationCounterSpan(buildingId);
     if (!span) return;
@@ -921,10 +948,9 @@ const ensureEducationCounterScrollListener = () => {
 };
 
 const countCoveredPersonnelForBuilding = buildingId => {
+    const span = getEducationCounterSpan(buildingId);
     const headingCounter = getCoveredPersonnelCounterFromHeading(buildingId);
-    if (headingCounter > 0) return headingCounter;
-
-    return Array.from(
+    const personnelCounter = Array.from(
         document.querySelectorAll(
             `.schooling_checkbox[building_id="${buildingId}"]`
         )
@@ -933,8 +959,16 @@ const countCoveredPersonnelForBuilding = buildingId => {
             isAlreadyEducatedForSelectedTraining(checkbox) ||
             isPersonnelInSelectedTraining(checkbox)
     ).length;
-};
 
+    if (
+        span?.dataset.educationLoaded === eduField.value ||
+        span?.dataset.educationCounterKnown === 'true'
+    ) {
+        return Math.max(headingCounter, personnelCounter);
+    }
+
+    return Math.max(headingCounter, personnelCounter);
+};
 const isPersonnelSelectableForTraining = checkbox =>
     !checkbox.disabled &&
     !isAlreadyEducatedForSelectedTraining(checkbox) &&
@@ -2187,3 +2221,7 @@ loadSchoolsButton.addEventListener('click', () => {
     });
 });
 })();
+
+
+
+
