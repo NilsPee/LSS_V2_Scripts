@@ -1,11 +1,18 @@
 // ==UserScript==
 // @name         LSS POI-Multitool
-// @namespace    https://www.leitstellenspiel.de/
-// @version      3.6.3
-// @description  POIs einzeln oder als konfigurierbares POI-Paket vormerken, speichern und verwalten.
+// @namespace    NilsPe.lss.poi.multitool
+// @version      1.0.0
+// @description  POIs einzeln oder als konfigurierbare POI-Pakete vormerken, speichern und verwalten
 // @author       NilsPe
+// @license      MIT
+// @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
+// @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
+// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-POI-Multitool.user.js
+// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-POI-Multitool.user.js
 // @match        https://www.leitstellenspiel.de/pois*
 // @match        https://www.leitstellenspiel.de/mission_positions*
+// @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
 
