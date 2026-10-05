@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Baumeister 2.0
+// @name         LSS Baumeister 2.0
 // @namespace    bos-ernie.leitstellenspiel.de
 // @version      2.3.1
 // @license      BSD-3-Clause

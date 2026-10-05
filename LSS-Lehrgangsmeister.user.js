@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name            Lehrgangsmeister
+// @name            LSS Lehrgangsmeister
 // @namespace       NilsPe.lehrgangsmeister
 // @version         1.1.5
 // @license         MIT

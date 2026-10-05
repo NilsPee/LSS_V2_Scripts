@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Gebaeude Personnel Selector
+// @name         LSS Gebaeude Personnel Selector
 // @namespace    NilsPe.personnel.Selector
 // @version      2.0.1
 // @description  Schnellauswahl von Personal zur Übernahme mit Lehrgangsfilter und nur ungebundenem Personal
