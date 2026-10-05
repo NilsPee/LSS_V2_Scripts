@@ -1,3 +1,4 @@
+
 # LSS V2 Scripts
 
 Userscripts von NilsPe fuer das Leitstellenspiel.
@@ -96,7 +97,7 @@ uebersprungen werden.
 
 ## Leitstelle Assign Trailer
 
-**Datei:** `Leitstelle-Assign-Trailer.user.js`
+**Datei:** `Leitstelle-Assign-Trailer`
 
 Weist Anhaenger im Fahrzeug-Tab einer Leitstelle automatisch passenden
 Zugfahrzeugen derselben Wache zu.
@@ -188,7 +189,7 @@ konfigurierten Maximum abweicht.
 
 ## Leitstelle Move Buildings
 
-**Datei:** `Leitstelle-Move-Buildings.user.js`
+**Datei:** `Leitstelle-Move-Buildings`
 
 Verschiebt ausgewaehlte Wachen einer Leitstelle gesammelt in eine andere
 Leitstelle.
@@ -206,7 +207,7 @@ zwischen den Anfragen ausgefuehrt werden.
 
 ## Leitstelle Rename Buildings
 
-**Datei:** `Leitstelle-Rename-Buildings.user.js`
+**Datei:** `Leitstelle-Rename-Buildings`
 
 Benennt die Gebaeude einer Leitstelle nach einem einheitlichen Schema um.
 
@@ -228,7 +229,7 @@ oder `000` aufgefuellt werden soll.
 
 ## Leitstelle Share Buildings
 
-**Datei:** `Leitstelle-Share-Buildings.user.js`
+**Datei:** `Leitstelle-Share-Buildings`
 
 Gibt ausgewaehlte Gebaeude einer Leitstelle fuer den Verband frei oder nimmt
 bestehende Freigaben wieder zurueck.
@@ -250,6 +251,16 @@ eingestellt werden. Nach einem Klick auf `Personal setzen` uebernimmt das
 Skript die Werte fuer alle passenden Gebaeude der geoeffneten Leitstelle und
 stellt die Personalwerbung auf automatisch.
 
+## Leitstelle Quick Settings
+
+**Datei:** `Leitstelle-Quick-Settings`
+
+Zeigt wichtige Leitstellen-Einstellungen direkt auf der Leitstellen-Hauptseite
+und in der Gebaeudeliste an.
+
+Die Einstellungen koennen dadurch schneller eingesehen und geaendert werden,
+ohne jede Leitstelle einzeln ueber ihre Bearbeitungsseite aufrufen zu muessen.
+
 ## Baumeister 2.0
 
 **Datei:** `Baumeister-2.user.js`
@@ -269,7 +280,7 @@ Raumaktionen laufen mit begrenzter Parallelitaet.
 
 ## Personnel Selector
 
-**Datei:** `Personnel-Selector.user.js`
+**Datei:** `Gebaeude-Personnel-Selector`
 
 Erweitert die Personaluebernahme zwischen Gebaeuden um eine schnelle Auswahl
 bestimmter Personalmengen.
@@ -316,6 +327,31 @@ nicht gleichzeitig aktiviert werden.
 
 Zeigt Credit-Abstaende in der Topliste und speichert einen begrenzten Verlauf
 fuer das Diagramm. Basiert auf einem MIT-lizenzierten Skript von Jan (jxn_30).
+
+## LSS Toplist Check
+
+**Datei:** `LSS-Toplist-Check.user.js`
+
+Prueft die Mitglieder eines Verbandes gegen die ersten 100 Seiten der
+LSS-Toplist (Top 2.000).
+
+Dabei werden die Mitglieder aller Verbandsseiten beruecksichtigt. Die
+Ergebnisse koennen unter anderem auf Spieler gefiltert werden, die nicht
+in der Toplist aufgefuehrt sind.
+
+## LSS POI-Multitool
+
+**Datei:** `POI_Multitool`
+
+Ermoeglicht es, einzelne POIs oder konfigurierbare POI-Pakete auf der Karte
+vorzumerken und gesammelt zu speichern.
+
+Die vorgemerkten POIs werden farblich auf der Karte dargestellt. Eine
+Warteschlange zeigt die Anzahl der vorgemerkten POIs je Typ an und kann
+optional auch nach einem Seiten-Reload erhalten bleiben.
+
+Zusaetzlich stehen Funktionen zur Verwaltung und zum gesammelten Loeschen
+gefilterter POIs zur Verfuegung.
 
 ## Wachen/Fhz Navigation Hotkeys
 
