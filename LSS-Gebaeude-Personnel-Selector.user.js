@@ -7,8 +7,8 @@
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
-// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Gebaeude-Personnel-Selector.user.js
-// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Gebaeude-Personnel-Selector.user.js
+// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Gebaeude-Personnel-Selector.user.js
+// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Gebaeude-Personnel-Selector.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*/hire
 // @match        https://*.leitstellenspiel.de/settings/index*
 // @grant        GM.getValue

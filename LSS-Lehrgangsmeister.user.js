@@ -7,8 +7,8 @@
 // @description     Reduziert die notwendigen Klicks beim Ausbilden grosser Personalmengen.
 // @homepageURL     https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL      https://github.com/NilsPee/LSS_V2_Scripts/issues
-// @downloadURL     https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Lehrgangsmeister.user.js
-// @updateURL       https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Lehrgangsmeister.user.js
+// @downloadURL     https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Lehrgangsmeister.user.js
+// @updateURL       https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Lehrgangsmeister.user.js
 // @match           https://*.leitstellenspiel.de/buildings/*
 // @grant           GM_getValue
 // @grant           GM_setValue

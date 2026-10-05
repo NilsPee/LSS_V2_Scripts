@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Wachen/Fhz Navigation Hotkeys
+// @name         LSS Wachen/Fhz Navigation Hotkeys
 // @namespace    bos-ernie.leitstellenspiel.de
 // @version      1.3.1
 // @license      BSD-3-Clause
@@ -7,8 +7,8 @@
 // @description  Hotkeys zum Navigieren zwischen Gebaeuden und Fahrzeugen.
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
-// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Wachen-Fhz-Navigation-Hotkeys.user.js
-// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Wachen-Fhz-Navigation-Hotkeys.user.js
+// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Wachen-Fhz-Navigation-Hotkeys.user.js
+// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Wachen-Fhz-Navigation-Hotkeys.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/vehicles/*
 // @match        https://*.leitstellenspiel.de/Vehicles/*

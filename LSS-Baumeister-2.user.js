@@ -7,8 +7,8 @@
 // @description  Mehrere Baupositionen vormerken, benennen und kontrolliert nacheinander bauen.
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
-// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Baumeister-2.user.js
-// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Baumeister-2.user.js
+// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Baumeister-2.user.js
+// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Baumeister-2.user.js
 // @match        https://*.leitstellenspiel.de/*
 // @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
