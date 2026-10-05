@@ -1,14 +1,12 @@
 // ==UserScript==
 // @name         Leitstelle Assign Trailer
 // @namespace    NilsPe.assign.trailer
-// @version      2.4.1
-// @description  Weist im Fahrzeug-Tab einer Leitstelle Anhänger konfigurierten Zugfahrzeugen derselben Wache zu
+// @version      2.5.0
+// @description  Weist Anhänger festen, konfigurierten Zugfahrzeugen derselben Wache zu und korrigiert falsche/Zufalls-Zuweisungen
 // @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
-// @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Assign-Trailer.user.js
-// @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Assign-Trailer.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
@@ -37,6 +35,13 @@
   };
 
   let running = false;
+
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
+
+  // ============================================================
+  // Anhänger-Konfiguration
+  // ============================================================
 
   const TRAILER_CONFIG = [
 
@@ -417,58 +422,46 @@
     }
   ];
 
-  const sleep = ms =>
-    new Promise(resolve =>
-      setTimeout(resolve, ms)
-    );
-
-  function vehicleTable() {
-    return document.getElementById('vehicle_table');
-  }
-
-  function currentDispatchCenterId() {
-    const match = location.pathname.match(
-      /^\/buildings\/(\d+)/
-    );
-
-    return match ? Number(match[1]) : null;
-  }
+  // ============================================================
+  // Einstellungen
+  // ============================================================
 
   function settingOptions(config) {
-    return config.towVehicles.map(vehicle => ({
-      value: vehicle.id,
-      name: vehicle.name
-    }));
+    return [
+      {
+        value: 0,
+        name: 'Keine Zuweisung'
+      },
+      ...config.towVehicles.map(vehicle => ({
+        value: vehicle.id,
+        name: vehicle.name
+      }))
+    ];
   }
 
-  // ============================================================
-  // Zusätzliche Persistenz der Selects
-  // ============================================================
-
   async function bindTrailerSettingPersistence(config) {
-    const select = Array.from(
-      document.querySelectorAll('select')
-    ).find(element =>
-      element.id?.includes(config.key)
-    );
+    const select =
+      Array.from(
+        document.querySelectorAll('select')
+      ).find(element =>
+        element.id?.includes(config.key)
+      );
 
     if (!select) {
-      console.warn(
-        '[Assign Trailer] Settings-Select nicht gefunden:',
-        config.key
-      );
       return;
     }
 
     let storedValues = [];
 
     try {
-      const raw = await GM.getValue(
-        config.key,
-        '[]'
-      );
+      const raw =
+        await GM.getValue(
+          config.key,
+          '[]'
+        );
 
-      const parsed = JSON.parse(raw);
+      const parsed =
+        JSON.parse(raw);
 
       if (Array.isArray(parsed)) {
         storedValues = parsed;
@@ -480,11 +473,10 @@
     const stored =
       storedValues.length === 1
         ? String(storedValues[0])
-        : '';
+        : '0';
 
     for (const option of select.options) {
       option.selected =
-        stored !== '' &&
         String(option.value) === stored;
     }
 
@@ -493,9 +485,7 @@
         ? unsafeWindow.jQuery ?? unsafeWindow.$
         : globalThis.jQuery ?? globalThis.$;
 
-    if (
-      typeof pageJQuery === 'function'
-    ) {
+    if (typeof pageJQuery === 'function') {
       const picker =
         pageJQuery(select);
 
@@ -507,27 +497,21 @@
       }
     }
 
-    const saveSelection = async () => {
-      const values =
-        Array.from(
-          select.selectedOptions
-        )
-          .map(option =>
-            Number(option.value)
-          )
-          .filter(Number.isInteger);
+    const saveSelection =
+      async () => {
+        const selected =
+          Number(select.value);
 
-      await GM.setValue(
-        config.key,
-        JSON.stringify(values)
-      );
+        const value =
+          Number.isInteger(selected)
+            ? selected
+            : 0;
 
-      console.log(
-        '[Assign Trailer] Einstellung gespeichert:',
-        config.trailerName,
-        values
-      );
-    };
+        await GM.setValue(
+          config.key,
+          JSON.stringify([value])
+        );
+      };
 
     select.addEventListener(
       'change',
@@ -555,6 +539,7 @@
       console.error(
         '[Assign Trailer] Scriptbasis/addOptions fehlt.'
       );
+
       return;
     }
 
@@ -614,9 +599,6 @@
       settings
     });
 
-    /*
-     * Zusätzlich eigene Persistenz anbinden.
-     */
     for (const config of TRAILER_CONFIG) {
       await bindTrailerSettingPersistence(
         config
@@ -625,16 +607,16 @@
   }
 
   async function selectedTowTypeId(config) {
-    const raw =
-      await GM.getValue(
-        config.key,
-        '[]'
-      );
-
     let values;
 
     try {
-      values = JSON.parse(raw);
+      values =
+        JSON.parse(
+          await GM.getValue(
+            config.key,
+            '[]'
+          )
+        );
     } catch {
       return null;
     }
@@ -650,21 +632,18 @@
       Number(values[0]);
 
     if (
-      !Number.isInteger(typeId)
+      !Number.isInteger(typeId) ||
+      typeId <= 0
     ) {
       return null;
     }
 
-    if (
-      !config.towVehicles.some(
-        vehicle =>
-          vehicle.id === typeId
-      )
-    ) {
-      return null;
-    }
-
-    return typeId;
+    return config.towVehicles.some(
+      vehicle =>
+        vehicle.id === typeId
+    )
+      ? typeId
+      : null;
   }
 
   async function loadMappings() {
@@ -676,9 +655,7 @@
           config
         );
 
-      if (
-        towTypeId === null
-      ) {
+      if (towTypeId === null) {
         continue;
       }
 
@@ -690,9 +667,12 @@
 
       mappings.push({
         category: config.category,
-        buildingTypes: config.buildingTypes,
-        trailerTypeId: config.trailerTypeId,
-        trailerName: config.trailerName,
+        buildingTypes:
+          config.buildingTypes,
+        trailerTypeId:
+          config.trailerTypeId,
+        trailerName:
+          config.trailerName,
         towTypeId,
         towName:
           towConfig?.name ??
@@ -725,11 +705,32 @@
           Number(
             await GM.getValue(
               KEYS.requestDelay,
-              100
+              500
             )
           ) || 0
         )
     };
+  }
+
+  // ============================================================
+  // Leitstelle / Fahrzeuge
+  // ============================================================
+
+  function vehicleTable() {
+    return document.getElementById(
+      'vehicle_table'
+    );
+  }
+
+  function currentDispatchCenterId() {
+    const match =
+      location.pathname.match(
+        /^\/buildings\/(\d+)/
+      );
+
+    return match
+      ? Number(match[1])
+      : null;
   }
 
   async function loadBuildingTypeMap(
@@ -802,13 +803,9 @@
           'td:nth-child(2) a[href*="/vehicles/"]'
         );
 
-      if (!vehicleLink) {
-        continue;
-      }
-
       const vehicleMatch =
         vehicleLink
-          .getAttribute('href')
+          ?.getAttribute('href')
           ?.match(
             /\/vehicles\/(\d+)/
           );
@@ -870,79 +867,21 @@
         id,
         typeId,
         buildingId,
-        buildingType
+        buildingType,
+        name:
+          vehicleLink
+            ?.textContent
+            ?.trim() ??
+          `Fahrzeug ${id}`
       });
     }
 
     return vehicles;
   }
 
-  function createCandidatePlan(
-    vehicles,
-    mappings
-  ) {
-    const reservedTowIds =
-      new Set();
-
-    const plan = [];
-
-    for (const mapping of mappings) {
-      const trailers =
-        vehicles
-          .filter(
-            vehicle =>
-              vehicle.typeId ===
-                mapping.trailerTypeId &&
-              mapping.buildingTypes.includes(
-                vehicle.buildingType
-              )
-          )
-          .sort(
-            (a, b) =>
-              a.id - b.id
-          );
-
-      const towVehicles =
-        vehicles
-          .filter(
-            vehicle =>
-              vehicle.typeId ===
-              mapping.towTypeId
-          )
-          .sort(
-            (a, b) =>
-              a.id - b.id
-          );
-
-      for (const trailer of trailers) {
-        const towVehicle =
-          towVehicles.find(
-            candidate =>
-              candidate.buildingId ===
-                trailer.buildingId &&
-              !reservedTowIds.has(
-                candidate.id
-              )
-          );
-
-        if (!towVehicle) {
-          continue;
-        }
-
-        reservedTowIds.add(
-          towVehicle.id
-        );
-
-        plan.push({
-          trailer,
-          towVehicle,
-          mapping
-        });
-      }
-    }
-
-    return plan;
-  }
+  // ============================================================
+  // Aktuelle Anhänger-Zuweisung auslesen
+  // ============================================================
 
   async function fetchTrailerAssignment(
     trailerId
@@ -982,127 +921,49 @@
         'select[name="vehicle[tractive_vehicle_id]"]'
       );
 
-    if (!select) {
-      return {
-        assigned: false,
-        towVehicleId: null
-      };
-    }
-
-    const value =
-      Number(select.value);
-
-    if (
-      Number.isInteger(value) &&
-      value > 0
-    ) {
-      return {
-        assigned: true,
-        towVehicleId: value
-      };
-    }
-
-    const selected =
-      select.querySelector(
-        'option:checked'
+    const randomInput =
+      doc.querySelector(
+        'input[name="vehicle[tractive_random]"]'
       );
 
-    const selectedValue =
-      Number(
-        selected?.value
-      );
+    const random =
+      !!randomInput?.checked;
+
+    let towVehicleId =
+      Number(select?.value);
 
     if (
-      Number.isInteger(
-        selectedValue
-      ) &&
-      selectedValue > 0
+      !Number.isInteger(towVehicleId) ||
+      towVehicleId <= 0
     ) {
-      return {
-        assigned: true,
-        towVehicleId:
-          selectedValue
-      };
+      towVehicleId =
+        Number(
+          select
+            ?.querySelector(
+              'option:checked'
+            )
+            ?.value
+        );
+    }
+
+    if (
+      !Number.isInteger(towVehicleId) ||
+      towVehicleId <= 0
+    ) {
+      towVehicleId = null;
     }
 
     return {
-      assigned: false,
-      towVehicleId: null
+      random,
+      assigned:
+        towVehicleId !== null,
+      towVehicleId
     };
   }
 
-  async function filterAlreadyAssigned(
-    candidatePlan,
-    checkDelay
-  ) {
-    const finalPlan = [];
-
-    let checked = 0;
-    let skipped = 0;
-
-    for (const assignment of candidatePlan) {
-      if (!running) {
-        break;
-      }
-
-      checked++;
-
-      setProgress(
-        `Prüfe Anhänger ${checked}/${candidatePlan.length} ...`,
-        checked,
-        0,
-        candidatePlan.length,
-        'info'
-      );
-
-      try {
-        const state =
-          await fetchTrailerAssignment(
-            assignment.trailer.id
-          );
-
-        if (state.assigned) {
-          skipped++;
-
-          console.log(
-            '[Assign Trailer] Bereits zugewiesen:',
-            assignment.trailer.id,
-            '→',
-            state.towVehicleId
-          );
-
-          continue;
-        }
-
-        finalPlan.push(
-          assignment
-        );
-
-      } catch (error) {
-        skipped++;
-
-        console.error(
-          '[Assign Trailer] Prüfung fehlgeschlagen:',
-          assignment.trailer.id,
-          error
-        );
-      }
-
-      if (
-        checkDelay > 0
-      ) {
-        await sleep(
-          checkDelay
-        );
-      }
-    }
-
-    console.log(
-      `[Assign Trailer] ${finalPlan.length} offen, ${skipped} übersprungen`
-    );
-
-    return finalPlan;
-  }
+  // ============================================================
+  // Anhänger speichern
+  // ============================================================
 
   function csrfToken() {
     return (
@@ -1131,6 +992,7 @@
         `/vehicles/${trailerId}`,
         {
           method: 'POST',
+
           credentials:
             'same-origin',
 
@@ -1153,9 +1015,12 @@
               authenticity_token:
                 token,
 
+              // WICHTIG:
+              // Zufallsfahrzeug immer AUS.
               'vehicle[tractive_random]':
                 '0',
 
+              // Konkretes Zugfahrzeug.
               'vehicle[tractive_vehicle_id]':
                 String(
                   towVehicleId
@@ -1173,6 +1038,275 @@
       );
     }
   }
+
+  // ============================================================
+  // Alle relevanten Anhänger prüfen
+  // ============================================================
+
+  async function inspectTrailers(
+    vehicles,
+    mappings,
+    checkDelay
+  ) {
+    const mappingByTrailerType =
+      new Map(
+        mappings.map(
+          mapping => [
+            mapping.trailerTypeId,
+            mapping
+          ]
+        )
+      );
+
+    const vehicleById =
+      new Map(
+        vehicles.map(
+          vehicle => [
+            vehicle.id,
+            vehicle
+          ]
+        )
+      );
+
+    const trailers =
+      vehicles
+        .filter(vehicle => {
+          const mapping =
+            mappingByTrailerType.get(
+              vehicle.typeId
+            );
+
+          return (
+            mapping &&
+            mapping.buildingTypes.includes(
+              vehicle.buildingType
+            )
+          );
+        })
+        .sort(
+          (a, b) =>
+            a.id - b.id
+        );
+
+    const inspected = [];
+
+    let checked = 0;
+    let errors = 0;
+
+    for (const trailer of trailers) {
+      if (!running) {
+        break;
+      }
+
+      const mapping =
+        mappingByTrailerType.get(
+          trailer.typeId
+        );
+
+      try {
+        const state =
+          await fetchTrailerAssignment(
+            trailer.id
+          );
+
+        const currentTow =
+          state.towVehicleId
+            ? vehicleById.get(
+                state.towVehicleId
+              )
+            : null;
+
+        inspected.push({
+          trailer,
+          mapping,
+          state,
+          currentTow
+        });
+
+      } catch (error) {
+        errors++;
+
+        console.error(
+          '[Assign Trailer] Prüfung fehlgeschlagen:',
+          trailer.id,
+          error
+        );
+      }
+
+      checked++;
+
+      setProgress(
+        `Prüfe Anhänger ${checked}/${trailers.length} ...`,
+        checked,
+        errors,
+        trailers.length,
+        errors
+          ? 'warning'
+          : 'info'
+      );
+
+      if (checkDelay > 0) {
+        await sleep(
+          checkDelay
+        );
+      }
+    }
+
+    return {
+      inspected,
+      errors
+    };
+  }
+
+  // ============================================================
+  // Reparaturplan
+  // ============================================================
+
+  function buildRepairPlan(
+    inspected,
+    vehicles
+  ) {
+    /*
+     * Zugfahrzeuge, die bereits eine saubere,
+     * feste 1:1-Zuweisung besitzen, werden reserviert.
+     */
+    const reservedTowIds =
+      new Set();
+
+    const keep = [];
+    const repair = [];
+
+    /*
+     * Pass 1:
+     * Bereits korrekte feste Zuweisungen behalten.
+     *
+     * "random" gilt ausdrücklich NICHT als korrekt.
+     */
+    for (const item of inspected) {
+      const {
+        state,
+        currentTow,
+        mapping,
+        trailer
+      } = item;
+
+      const correctFixed =
+        !state.random &&
+        state.assigned &&
+        currentTow &&
+        currentTow.typeId ===
+          mapping.towTypeId &&
+        currentTow.buildingId ===
+          trailer.buildingId &&
+        !reservedTowIds.has(
+          currentTow.id
+        );
+
+      if (correctFixed) {
+        reservedTowIds.add(
+          currentTow.id
+        );
+
+        keep.push(
+          item
+        );
+
+      } else {
+        repair.push(
+          item
+        );
+      }
+    }
+
+    /*
+     * Pass 2:
+     * Offene, falsche, zufällige oder mehrfache
+     * Zuweisungen reparieren.
+     */
+    const plan = [];
+    const noTowVehicle = [];
+
+    for (const item of repair) {
+      const candidates =
+        vehicles
+          .filter(vehicle =>
+            vehicle.typeId ===
+              item.mapping.towTypeId &&
+
+            vehicle.buildingId ===
+              item.trailer.buildingId &&
+
+            !reservedTowIds.has(
+              vehicle.id
+            )
+          )
+          .sort(
+            (a, b) =>
+              a.id - b.id
+          );
+
+      const towVehicle =
+        candidates[0];
+
+      if (!towVehicle) {
+        noTowVehicle.push(
+          item
+        );
+
+        continue;
+      }
+
+      reservedTowIds.add(
+        towVehicle.id
+      );
+
+      let reason =
+        'nicht zugewiesen';
+
+      if (item.state.random) {
+        reason =
+          'Zufallsfahrzeug aktiv';
+
+      } else if (
+        item.state.assigned &&
+        item.currentTow?.typeId !==
+          item.mapping.towTypeId
+      ) {
+        reason =
+          'falscher Zugfahrzeugtyp';
+
+      } else if (
+        item.state.assigned &&
+        item.currentTow?.buildingId !==
+          item.trailer.buildingId
+      ) {
+        reason =
+          'Zugfahrzeug falsche Wache';
+
+      } else if (
+        item.state.assigned
+      ) {
+        reason =
+          'Zugfahrzeug mehrfach verwendet';
+      }
+
+      plan.push({
+        ...item,
+        towVehicle,
+        reason
+      });
+    }
+
+    return {
+      keep,
+      plan,
+      noTowVehicle
+    };
+  }
+
+  // ============================================================
+  // Fortschrittsanzeige
+  // ============================================================
 
   function ensureProgress() {
     if (
@@ -1384,9 +1518,11 @@
       `${errors / safeTotal * 100}%`;
   }
 
-  async function run(
-    buttons
-  ) {
+  // ============================================================
+  // Hauptlauf
+  // ============================================================
+
+  async function run(buttons) {
     if (running) {
       return;
     }
@@ -1413,8 +1549,7 @@
 
       buttons.forEach(
         button => {
-          button.disabled =
-            true;
+          button.disabled = true;
         }
       );
 
@@ -1455,27 +1590,17 @@
         );
       }
 
-      const candidatePlan =
-        createCandidatePlan(
+      /*
+       * Anders als früher werden jetzt ALLE
+       * konfigurierten Anhänger geprüft.
+       */
+      const {
+        inspected,
+        errors: checkErrors
+      } =
+        await inspectTrailers(
           vehicles,
-          config.mappings
-        );
-
-      if (!candidatePlan.length) {
-        setProgress(
-          'Keine passenden Zuweisungen gefunden',
-          0,
-          0,
-          0,
-          'success'
-        );
-
-        return;
-      }
-
-      const plan =
-        await filterAlreadyAssigned(
-          candidatePlan,
+          config.mappings,
           config.checkDelay
         );
 
@@ -1483,24 +1608,64 @@
         return;
       }
 
-      if (!plan.length) {
+      if (!inspected.length) {
         setProgress(
-          'Alle passenden Anhänger sind bereits zugewiesen',
+          'Keine konfigurierten Anhänger gefunden',
           0,
+          checkErrors,
           0,
-          0,
-          'success'
+          checkErrors
+            ? 'warning'
+            : 'success'
+        );
+
+        return;
+      }
+
+      const {
+        keep,
+        plan,
+        noTowVehicle
+      } =
+        buildRepairPlan(
+          inspected,
+          vehicles
+        );
+
+      if (!plan.length) {
+        const message =
+          noTowVehicle.length
+            ? (
+                `Keine Änderung möglich: ` +
+                `${keep.length} korrekt, ` +
+                `${noTowVehicle.length} ohne freies passendes Zugfahrzeug`
+              )
+            : (
+                `Alles korrekt: ` +
+                `${keep.length} feste Zuweisungen`
+              );
+
+        setProgress(
+          message,
+          inspected.length,
+          checkErrors,
+          inspected.length,
+          checkErrors ||
+          noTowVehicle.length
+            ? 'warning'
+            : 'success'
         );
 
         return;
       }
 
       let completed = 0;
-      let errors = 0;
-      let assigned = 0;
+      let errors =
+        checkErrors;
+      let changed = 0;
 
       setProgress(
-        `0/${plan.length} Anhänger`,
+        `0/${plan.length} Zuweisungen werden korrigiert`,
         0,
         0,
         plan.length
@@ -1514,25 +1679,44 @@
         const {
           trailer,
           towVehicle,
-          mapping
+          mapping,
+          reason
         } =
           assignment;
 
         setProgress(
           `${completed}/${plan.length}: ` +
-          `${mapping.trailerName} → ${mapping.towName}`,
+          `${mapping.trailerName} → ${mapping.towName} ` +
+          `(${reason})`,
           completed,
-          errors,
+          errors - checkErrors,
           plan.length
         );
 
         try {
+          /*
+           * assignTrailer setzt IMMER:
+           *
+           * tractive_random = 0
+           * +
+           * konkrete Zugfahrzeug-ID.
+           */
           await assignTrailer(
             trailer.id,
             towVehicle.id
           );
 
-          assigned++;
+          changed++;
+
+          console.log(
+            '[Assign Trailer] Korrigiert:',
+            trailer.id,
+            '→',
+            towVehicle.id,
+            mapping.towName,
+            '| Grund:',
+            reason
+          );
 
         } catch (error) {
           errors++;
@@ -1548,11 +1732,11 @@
 
         setProgress(
           `${completed}/${plan.length} bearbeitet, ` +
-          `${assigned} zugewiesen`,
+          `${changed} geändert`,
           completed,
-          errors,
+          errors - checkErrors,
           plan.length,
-          errors
+          errors > checkErrors
             ? 'warning'
             : 'success'
         );
@@ -1572,11 +1756,16 @@
       }
 
       setProgress(
-        `Fertig: ${assigned} zugewiesen, ${errors} Fehler`,
-        completed,
-        errors,
+        `Fertig: ` +
+        `${keep.length} bereits korrekt, ` +
+        `${changed} geändert, ` +
+        `${noTowVehicle.length} ohne freies Zugfahrzeug, ` +
+        `${errors} Fehler`,
         plan.length,
-        errors
+        errors - checkErrors,
+        plan.length,
+        errors ||
+        noTowVehicle.length
           ? 'warning'
           : 'success'
       );
@@ -1606,6 +1795,10 @@
       );
     }
   }
+
+  // ============================================================
+  // Buttons
+  // ============================================================
 
   function settingsButton() {
     const button =
@@ -1734,6 +1927,10 @@
         table
       );
   }
+
+  // ============================================================
+  // Start
+  // ============================================================
 
   if (
     location.pathname.startsWith(
