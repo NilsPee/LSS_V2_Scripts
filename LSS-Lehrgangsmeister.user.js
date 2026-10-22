@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            LSS Lehrgangsmeister
 // @namespace       NilsPe.lehrgangsmeister
-// @version         1.1.5
+// @version         1.4.3
 // @license         MIT
 // @author          NilsPe
 // @description     Reduziert die notwendigen Klicks beim Ausbilden grosser Personalmengen.
@@ -96,6 +96,46 @@ roomLimitInput.addEventListener('keydown', event => {
     loadSchoolsButton.click();
 });
 roomLimitLabel.append(roomLimitInput, loadSchoolsButton);
+const roomLoadStatus = document.createElement('span');
+roomLoadStatus.setAttribute('role', 'status');
+roomLoadStatus.style.marginLeft = '8px';
+roomLimitLabel.append(roomLoadStatus);
+let roomLoadStartedAt = 0;
+let roomLoadMetrics = {};
+let roomLoadRun = 0;
+let roomTaskObserver = null;
+let roomMeasurementActive = false;
+const roomLongTasks = [];
+try {
+    if (typeof PerformanceObserver !== 'undefined' &&
+        PerformanceObserver.supportedEntryTypes?.includes('longtask')) {
+        roomTaskObserver = new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) {
+                if (roomMeasurementActive && entry.startTime >= roomLoadStartedAt) roomLongTasks.push(entry.duration);
+            }
+        });
+        roomTaskObserver.observe({ type: 'longtask' });
+    }
+} catch (error) { console.debug('[Lehrgangsmeister] Longtask-Messung nicht verfuegbar', error); }
+const finishRoomPaintMeasurement = run => {
+    // Two frames include a rendering opportunity after the script finished.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (run !== roomLoadRun || schoolsLoading) return;
+        for (const entry of roomTaskObserver?.takeRecords() ?? []) {
+            if (entry.startTime >= roomLoadStartedAt) roomLongTasks.push(entry.duration);
+        }
+        const totalMs = performance.now() - roomLoadStartedAt;
+        roomMeasurementActive = false;
+        roomLoadMetrics.displayWaitMs = Math.max(0, totalMs - roomLoadMetrics.totalJsMs);
+        roomLoadMetrics.longestBlockMs = roomLongTasks.reduce((max, duration) => Math.max(max, duration), 0);
+        roomLoadStatus.textContent = `Bereit: Daten/Script ${(roomLoadMetrics.totalJsMs / 1000).toFixed(1)} s, ` +
+            `Anzeige danach ${(roomLoadMetrics.displayWaitMs / 1000).toFixed(1)} s`;
+        roomLoadStatus.title += roomTaskObserver
+            ? `; laengste Blockade: ${(roomLoadMetrics.longestBlockMs / 1000).toFixed(1)} s`
+            : '; Blockadenmessung in diesem Browser nicht verfuegbar';
+        console.info('[Lehrgangsmeister] Raumladen inkl. Darstellung', { ...roomLoadMetrics, totalMs });
+    }));
+};
 
 // checkbox to (dis-)allow opening empty schools
 const allowEmptyLabel = document.createElement('label');
@@ -119,32 +159,14 @@ allowEmptyLabel.prepend(allowEmptyCheckbox);
 const CLASSES_ONLY_MODE = true;
 let personnelUiAllowed = false;
 
-const getOriginalPersonnelStash = () => {
-    let stash = document.querySelector('#jxn_original_personnel_stash');
-    if (stash) return stash;
-
-    stash = document.createElement('div');
-    stash.id = 'jxn_original_personnel_stash';
-    stash.style.setProperty('display', 'none');
-    (document.body || document.documentElement).append(stash);
-    return stash;
-};
+// A detached fragment, rather than display:none: unrelated stations should not
+// participate in document-wide selectors, observers and style recalculation.
+const originalPersonnelStash = document.createDocumentFragment();
+const getOriginalPersonnelStash = () => originalPersonnelStash;
 
 const removePersonnelSelectionUi = () => {
-    return;
     if (!CLASSES_ONLY_MODE || personnelUiAllowed) return;
-
-    document.querySelectorAll('.personal-select-heading').forEach(heading => {
-        const panel = heading.closest('.panel');
-        if (!panel || panel.closest('#jxn_original_personnel_stash')) return;
-        getOriginalPersonnelStash().append(panel);
-    });
-
-    document.querySelectorAll('h3').forEach(heading => {
-        if (heading.textContent?.trim() === 'Personal auswählen') {
-            heading.remove();
-        }
-    });
+    parkPersonnelPanels();
 };
 
 
@@ -219,6 +241,16 @@ form?.append(selectStyle);
 
 const updateSelectStyle = () => {
     roomsSelection.disabled = false;
+    if (CLASSES_ONLY_MODE) {
+        // The legacy multi-course controls do not exist in this mode. Avoid
+        // scanning the large personnel form and rewriting its stylesheet.
+        const css = `body:has(#${allowEmptyCheckbox.id}:checked) #accordion > .panel,
+            form.${isDurchschloedelingClass} #accordion > .panel {
+                opacity: 0.5; pointer-events: none;
+            }`;
+        if (selectStyle.textContent !== css) selectStyle.textContent = css;
+        return;
+    }
 
     const remainingRooms =
         parseInt(roomsSelection.lastElementChild.value) -
@@ -361,6 +393,8 @@ const getStaffBuildingCandidates = buildings => {
  * @param {Building[]} schools
  */
 const setRoomSelection = schools => {
+    const startedAt = performance.now();
+    const previousValue = Number(roomsSelection.value) || 1;
     const filteredSchools = getLimitedSchools(getUsableSchools(schools));
 
     const totalFreeRooms = filteredSchools.reduce(
@@ -373,7 +407,7 @@ const setRoomSelection = schools => {
     :   totalFreeRooms;
 
     // fill rooms selection with available rooms
-    roomsSelection.replaceChildren();
+    const options = document.createDocumentFragment();
 
     const zeroOption = document.createElement('option');
     zeroOption.value = '0';
@@ -386,16 +420,100 @@ const setRoomSelection = schools => {
         const option = document.createElement('option');
         option.value = i.toString();
         option.textContent = i.toString();
-        roomsSelection.append(option);
+        options.append(option);
         schoolingRoomSelections.forEach(({ select }) =>
             select.append(option.cloneNode(true))
         );
     }
-
-    roomsSelection.dispatchEvent(new InputEvent('change'));
+    if (!selectableRooms) options.append(zeroOption.cloneNode(true));
+    roomsSelection.replaceChildren(options);
+    roomsSelection.value = String(selectableRooms ? Math.min(previousValue, selectableRooms) : 0);
+    // A rebuild with the same value needs no expensive native change handlers.
+    if (Number(roomsSelection.value) !== previousValue) {
+        roomsSelection.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+        updateSelectStyle();
+    }
+    roomLoadMetrics.dropdownMs = performance.now() - startedAt;
 };
 
 const eduField = form.elements.education_select;
+
+const COURSE_FILTER_KEY = 'nilspe_hidden_courses_' + buildingType;
+const storedHiddenCourses = GM_getValue(COURSE_FILTER_KEY, []);
+const hiddenCourses = new Set(Array.isArray(storedHiddenCourses) ? storedHiddenCourses : []);
+const courseFilter = document.createElement('details');
+courseFilter.id = 'nilspe-course-filter';
+courseFilter.style.margin = '8px 0';
+const courseSummary = document.createElement('summary');
+courseSummary.textContent = 'Lehrgaenge ein-/ausblenden';
+courseFilter.append(courseSummary);
+const courseControls = [];
+for (const option of Array.from(eduField.options)) {
+    if (!option.value) continue;
+    const label = document.createElement('label');
+    label.style.cssText = 'display:block;font-weight:normal';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !hiddenCourses.has(option.value);
+    label.append(input, document.createTextNode(' ' + option.textContent.trim()));
+    courseFilter.append(label);
+    courseControls.push({ option, input, originallyDisabled: option.disabled });
+    input.addEventListener('change', () => {
+        if (input.checked) hiddenCourses.delete(option.value);
+        else hiddenCourses.add(option.value);
+        GM_setValue(COURSE_FILTER_KEY, [...hiddenCourses]);
+        applyCourseFilter();
+    });
+}
+function applyCourseFilter() {
+    for (const { option, input, originallyDisabled } of courseControls) {
+        // Keep the selected course available; never change a training implicitly.
+        const selected = option.value === eduField.value;
+        input.disabled = selected || originallyDisabled;
+        input.checked = selected || !hiddenCourses.has(option.value);
+        const hidden = !selected && hiddenCourses.has(option.value);
+        option.hidden = hidden;
+        option.disabled = originallyDisabled || hidden;
+        option.style.display = hidden ? 'none' : '';
+    }
+}
+eduField.after(courseFilter);
+eduField.addEventListener('change', applyCourseFilter);
+applyCourseFilter();
+
+// One bounded queue shared by visible counters and bulk filtering.
+function createCounterQueue(limit) {
+    let active = 0;
+    const waiting = [];
+    const next = () => {
+        while (active < limit && waiting.length) {
+            const job = waiting.shift();
+            active++;
+            Promise.resolve().then(job.task).then(job.resolve, job.reject)
+                .finally(() => { active--; next(); });
+        }
+    };
+    const enqueue = task => new Promise((resolve, reject) => {
+        waiting.push({ task, resolve, reject });
+        next();
+    });
+    enqueue.setLimit = value => {
+        limit = Math.max(1, Math.min(10, Math.floor(Number(value) || 3)));
+        next();
+    };
+    return enqueue;
+}
+const queueCounterRequest = createCounterQueue(3);
+const pendingCounterRequests = new Map();
+const activeCounterControllers = new Set();
+let educationRevision = 0;
+const PARTICIPANT_PARALLELISM_KEY = 'nilspe_training_parallelism';
+const normalizeParallelism = value => Number.isInteger(Number(value)) &&
+    Number(value) >= 1 && Number(value) <= 10 ? Number(value) : 3;
+let participantParallelism = normalizeParallelism(GM_getValue(PARTICIPANT_PARALLELISM_KEY, 3));
+queueCounterRequest.setLimit(participantParallelism);
+
 const getTrainingDuration = () =>
     parseInt(
         eduField
@@ -678,6 +796,39 @@ const fetchGameBuildings = () =>
 const fetchAllianceBuildings = () =>
     loadCachedBuildings('allianceBuildings', updateAllianceBuildings);
 
+const loadSchoolCatalogue = async () => {
+    roomLoadStatus.textContent = 'Gebaeudespeicher oeffnen …';
+    const openStart = performance.now();
+    const db = await openDb();
+    roomLoadMetrics.openMs = performance.now() - openStart;
+    try {
+        roomLoadStatus.textContent = 'Schuldaten aktualisieren …';
+        const syncStart = performance.now();
+        await (isAllianceSchool ? updateAllianceBuildings : updateBuildings)(db, 0);
+        roomLoadMetrics.apiMs = performance.now() - syncStart;
+        roomLoadStatus.textContent = 'Passende Schulen aus Speicher lesen …';
+        const readStart = performance.now();
+        // Read only this school type, not thousands of unrelated stations.
+        const schools = await getDataByIndex(db,
+            isAllianceSchool ? 'allianceBuildings' : 'buildings',
+            'building_type', buildingType);
+        roomLoadMetrics.readMs = performance.now() - readStart;
+        return schools.toSorted((a, b) => Number(a.id) - Number(b.id));
+    } finally {
+        db.close();
+    }
+};
+let staffBuildingsPromise = null;
+const ensureStaffBuildings = async () => {
+    if (!staffBuildingsPromise) {
+        staffBuildingsPromise = fetchGameBuildings().then(buildings => {
+            currentBuildings = buildings;
+            return buildings;
+        }).catch(error => { staffBuildingsPromise = null; throw error; });
+    }
+    return staffBuildingsPromise;
+};
+
 const persistSchoolState = async school => {
     const db = await openDb();
 
@@ -698,6 +849,28 @@ let schoolSelectionListenersAttached = false;
 let submitHandlerAttached = false;
 let currentSchools = [];
 let currentBuildings = [];
+let schoolOptionsSignature = '';
+const renderSpecificSchoolOptions = schools => {
+    // The list is hidden by default. Build it only when it is actually used.
+    if (!useSpecificSchoolsCheckbox.checked) return;
+    const entries = schools.map(school => ({ school, free: getFreeRooms(school) }))
+        .filter(entry => entry.free > 0);
+    const signature = JSON.stringify(entries.map(({ school, free }) =>
+        [String(school.id), school.caption, free]));
+    if (signature === schoolOptionsSignature) return;
+    const selected = new Set(Array.from(specificSchoolSelection.selectedOptions,
+        option => option.value));
+    const options = document.createDocumentFragment();
+    for (const { school, free } of entries) {
+        const option = document.createElement('option');
+        option.value = String(school.id);
+        option.textContent = `${school.caption} (${free} Zimmer frei)`;
+        option.selected = selected.has(option.value);
+        options.append(option);
+    }
+    specificSchoolSelection.replaceChildren(options);
+    schoolOptionsSignature = signature;
+};
 let keywordAssignerRendered = false;
 let educationCounterScrollListenerAttached = false;
 let educationCounterScrollTimeout;
@@ -880,11 +1053,38 @@ const storeEducationCounterDataset = (buildingId, counters) => {
     span.dataset.inTrainingCount = (counters.inTraining || 0).toString();
 };
 
-const loadEducationCounterForBuilding = async buildingId => {
+const loadEducationCounterForBuilding = buildingId => {
+    const education = eduField.value;
+    const revision = educationRevision;
+    const key = revision + ':' + education + ':' + buildingId;
+    if (pendingCounterRequests.has(key)) return pendingCounterRequests.get(key);
+    const request = queueCounterRequest(() => {
+        if (education !== eduField.value || revision !== educationRevision) return 0;
+        return fetchEducationCounterForBuilding(buildingId, education, revision);
+    }).finally(() => pendingCounterRequests.delete(key));
+    pendingCounterRequests.set(key, request);
+    return request;
+};
+
+const fetchCounterScript = async (url, timeoutMs = 15000) => {
+    const controller = new AbortController();
+    activeCounterControllers.add(controller);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        return await response.text();
+    } finally {
+        clearTimeout(timeout);
+        activeCounterControllers.delete(controller);
+    }
+};
+
+const fetchEducationCounterForBuilding = async (buildingId, education, revision) => {
     const onlyNumber = getSelectedEducationNumber();
     const span = getEducationCounterSpan(buildingId);
     if (!span) return 0;
-    if (!onlyNumber) {
+    if (onlyNumber == null) {
         delete span.dataset.educationCounterKnown;
         span.dataset.educationCounterFailed = 'true';
         return 0;
@@ -893,11 +1093,10 @@ const loadEducationCounterForBuilding = async buildingId => {
         return getCoveredPersonnelCounterFromHeading(buildingId);
     }
     try {
-        const res = await fetch(
+        const script = await fetchCounterScript(
             `/buildings/${schoolBuildingId}/schoolingEducationCheck?education=${onlyNumber}&only_building_id=${buildingId}`
         );
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        const script = await res.text();
+        if (education !== eduField.value || revision !== educationRevision) return 0;
         let parsedCounters;
         try {
             // The game returns JavaScript which renders the exact counters.
@@ -910,7 +1109,7 @@ const loadEducationCounterForBuilding = async buildingId => {
             );
             parsedCounters = parseEducationCountersFromScript(script);
         }
-        span.dataset.educationLoaded = eduField.value;
+        span.dataset.educationLoaded = education;
         span.dataset.educatedCount = (parsedCounters.educated || 0).toString();
         span.dataset.inTrainingCount = (parsedCounters.inTraining || 0).toString();
         storeEducationCounterDataset(buildingId, parsedCounters);
@@ -918,6 +1117,7 @@ const loadEducationCounterForBuilding = async buildingId => {
 
         span.dataset.educationCounterKnown = 'true';
     } catch (error) {
+        if (education !== eduField.value || revision !== educationRevision) return 0;
         delete span.dataset.educationLoaded;
         span.dataset.educationCounterKnown = 'true';
         span.dataset.educationCounterFailed = 'true';
@@ -931,6 +1131,8 @@ const loadVisibleEducationCounters = () => {
         .querySelectorAll('.personal-select-heading-building')
         .forEach(span => {
             if (span.dataset.educationLoaded === eduField.value) return;
+            // Hidden panels have a zero rectangle; that does not make them visible.
+            if (span.getClientRects().length === 0) return;
             const rect = span.getBoundingClientRect();
             const viewportHeight =
                 unsafeWindow.innerHeight ||
@@ -960,6 +1162,8 @@ const ensureEducationCounterScrollListener = () => {
         ?.addEventListener('scroll', queueVisibleEducationCounters);
     unsafeWindow.addEventListener('scroll', queueVisibleEducationCounters);
     eduField.addEventListener('change', () => {
+        educationRevision++;
+        prefetchedPersonnelHtml.clear();
         document
             .querySelectorAll('.personal-select-heading-building')
             .forEach(span => {
@@ -969,6 +1173,10 @@ const ensureEducationCounterScrollListener = () => {
                 delete span.dataset.educationCounterKnown;
                 delete span.dataset.educationCounterFailed;
             });
+        document.querySelectorAll('[data-nilspe-hidden-at-target]').forEach(panel => {
+            panel.style.removeProperty('display');
+            delete panel.dataset.nilspeHiddenAtTarget;
+        });
         queueVisibleEducationCounters();
     });
 };
@@ -977,9 +1185,7 @@ const countCoveredPersonnelForBuilding = buildingId => {
     const span = getEducationCounterSpan(buildingId);
     const headingCounter = getCoveredPersonnelCounterFromHeading(buildingId);
     const personnelCounter = Array.from(
-        document.querySelectorAll(
-            `.schooling_checkbox[building_id="${buildingId}"]`
-        )
+        getPersonnelCheckboxes(buildingId)
     ).filter(
         checkbox =>
             isAlreadyEducatedForSelectedTraining(checkbox) ||
@@ -1001,16 +1207,16 @@ const isPersonnelSelectableForTraining = checkbox =>
     !isPersonnelInSelectedTraining(checkbox) &&
     getPersonnelEducationText(checkbox) === '';
 
-const disableAlreadyEducatedPersonnel = () => {
+const disableAlreadyEducatedPersonnel = (scope = document) => {
     const educationKey = getSelectedEducationKey();
     if (!educationKey) return;
-    document
+    scope
         .querySelectorAll('.schooling_checkbox[data-jxn-disabled-education]')
         .forEach(checkbox => {
             checkbox.disabled = false;
             checkbox.removeAttribute('data-jxn-disabled-education');
         });
-    document
+    scope
         .querySelectorAll(`.schooling_checkbox[${educationKey}="true"]`)
         .forEach(checkbox => {
             checkbox.checked = false;
@@ -1030,15 +1236,56 @@ const updateSchoolingFree = () => {
     unsafeWindow.update_costs?.();
 };
 
+const getPersonnelBody = buildingId =>
+    getPersonnelHeading(buildingId)?.closest('.panel')?.querySelector('.panel-body') ?? null;
+const getPersonnelCheckboxes = buildingId =>
+    Array.from(getPersonnelBody(buildingId)?.querySelectorAll('.schooling_checkbox') ?? []);
 const countSelectedPersonnelForBuilding = buildingId =>
-    document.querySelectorAll(
-        `.schooling_checkbox[building_id="${buildingId}"]:checked`
-    ).length;
+    getPersonnelCheckboxes(buildingId).filter(checkbox => checkbox.checked).length;
+
+// Keep unselected personnel in memory, rather than accumulating hundreds of
+// hidden table rows per processed station in the active school form.
+const parkedPersonnelRows = new Map();
+const withDetachedPersonnelBody = (body, task) => {
+    const parent = body.parentNode;
+    const next = body.nextSibling;
+    if (parent) parent.removeChild(body);
+    try { task(); }
+    finally { if (parent) parent.insertBefore(body, next); }
+};
+const restorePersonnelRows = buildingId => {
+    const entry = parkedPersonnelRows.get(String(buildingId));
+    if (!entry) return;
+    withDetachedPersonnelBody(entry.body, () => {
+        for (const group of entry.groups) {
+            const fragment = document.createDocumentFragment();
+            group.nodes.forEach(node => fragment.append(node));
+            group.parent.replaceChildren(fragment);
+        }
+    });
+    parkedPersonnelRows.delete(String(buildingId));
+    disableAlreadyEducatedPersonnel(entry.body);
+};
+const compactPersonnelRows = buildingId => {
+    if (parkedPersonnelRows.has(String(buildingId))) return;
+    const body = getPersonnelBody(buildingId);
+    if (!body) return;
+    const rowsToPark = new Set(getPersonnelCheckboxes(buildingId)
+        .filter(checkbox => !checkbox.checked)
+        .map(checkbox => checkbox.closest('tr'))
+        .filter(row => row && !row.querySelector('.schooling_checkbox:checked')));
+    if (!rowsToPark.size) return;
+    const parents = new Set(Array.from(rowsToPark, row => row.parentNode));
+    const groups = Array.from(parents, parent => ({ parent, nodes: Array.from(parent.childNodes) }));
+    const stash = document.createDocumentFragment();
+    withDetachedPersonnelBody(body, () => {
+        rowsToPark.forEach(row => stash.append(row));
+    });
+    parkedPersonnelRows.set(String(buildingId), { body, groups, stash });
+};
 
 const updateSelectionCounter = buildingId => {
-    const heading = document.querySelector(
-        `.personal-select-heading[building_id="${buildingId}"]`
-    );
+    const heading = getPersonnelHeading(buildingId);
     if (!heading) return;
 
     let counter = heading.querySelector('.jxn-selected-personnel-counter');
@@ -1080,11 +1327,15 @@ const ensurePersonnelWrapper = () => {
         return accordion;
     }
 
-    heading = document.createElement('h3');
-    heading.id = 'jxn_keyword_personnel_heading';
-    heading.textContent = 'Personal auswählen';
-    accordion = document.createElement('div');
-    accordion.id = 'accordion';
+    if (!heading) {
+        heading = document.createElement('h3');
+        heading.id = 'jxn_keyword_personnel_heading';
+        heading.textContent = 'Personal auswählen';
+    }
+    if (!accordion) {
+        accordion = document.createElement('div');
+        accordion.id = 'accordion';
+    }
     if (assigner) {
         assigner.after(heading, accordion);
     } else {
@@ -1093,14 +1344,63 @@ const ensurePersonnelWrapper = () => {
     return accordion;
 };
 
+const personnelHeadingIndex = new Map();
+let personnelHeadingIndexReady = false;
+const parkPersonnelPanels = () => {
+    const accordion = document.querySelector('#accordion');
+    const parent = accordion?.parentNode;
+    if (!parent) return;
+    const next = accordion.nextSibling;
+    // Detach the container once. Moving thousands of children while it is
+    // connected would itself trigger document-wide observers thousands of times.
+    parent.removeChild(accordion);
+    try {
+        accordion.querySelectorAll('.personal-select-heading[building_id]').forEach(heading => {
+            personnelHeadingIndex.set(String(heading.getAttribute('building_id')), heading);
+            const panel = heading.closest('.panel');
+            if (!panel || panel.querySelector('.schooling_checkbox:checked')) return;
+            originalPersonnelStash.append(panel);
+        });
+        personnelHeadingIndexReady = true;
+    } finally {
+        parent.insertBefore(accordion, next);
+    }
+};
+const restorePersonnelPanels = () => {
+    const accordion = ensurePersonnelWrapper();
+    const parent = accordion.parentNode;
+    const next = accordion.nextSibling;
+    parent.removeChild(accordion);
+    try {
+        for (const panel of Array.from(originalPersonnelStash.children)) {
+            panel.style.removeProperty('display');
+            accordion.append(panel);
+        }
+    } finally {
+        parent.insertBefore(accordion, next);
+    }
+};
+const getPersonnelHeading = buildingId => {
+    if (!personnelHeadingIndexReady) {
+        document.querySelectorAll('.personal-select-heading[building_id]').forEach(heading => {
+            personnelHeadingIndex.set(heading.getAttribute('building_id'), heading);
+        });
+        personnelHeadingIndexReady = true;
+    }
+    const key = String(buildingId);
+    const known = personnelHeadingIndex.get(key);
+    if (known) return known;
+    const heading = document.querySelector(`.personal-select-heading[building_id="${key}"]`);
+    if (heading) personnelHeadingIndex.set(key, heading);
+    return heading;
+};
+
 const renderBuildingPanel = building => {
     const accordion = ensurePersonnelWrapper();
-    const existing = document.querySelector(
-        `.personal-select-heading[building_id="${building.id}"]`
-    );
+    const existing = getPersonnelHeading(building.id);
     const existingPanel = existing?.closest('.panel');
     if (existingPanel) {
-        if (existingPanel.closest('#jxn_original_personnel_stash')) {
+        if (!existingPanel.isConnected || existingPanel.closest('#jxn_original_personnel_stash')) {
             accordion.append(existingPanel);
         }
         existingPanel.style.removeProperty('display');
@@ -1114,6 +1414,7 @@ const renderBuildingPanel = building => {
     const heading = document.createElement('div');
     heading.classList.add('panel-heading', 'personal-select-heading');
     heading.setAttribute('building_id', building.id.toString());
+    personnelHeadingIndex.set(String(building.id), heading);
     heading.setAttribute(
         'href',
         `/buildings/${building.id}/schooling_personal_select`
@@ -1160,80 +1461,123 @@ const clearRenderedBuildingPanels = () => {
     document.querySelectorAll('.schooling_checkbox:checked').forEach(
         checkbox => (checkbox.checked = false)
     );
-    document
-        .querySelectorAll('.personal-select-heading[building_id]')
-        .forEach(heading =>
-            heading.closest('.panel')?.style.setProperty('display', 'none')
-        );
+    parkPersonnelPanels();
     updateSchoolingFree();
 };
 
+const prefetchedPersonnelHtml = new Map();
+let participantTimings = null;
+const requestPersonnelHtml = (buildingId, href, revision = educationRevision) => {
+    const key = revision + ':' + buildingId;
+    if (!prefetchedPersonnelHtml.has(key)) {
+        const request = queueCounterRequest(async () => {
+            if (revision !== educationRevision) throw new Error('Auswahl abgebrochen.');
+            return fetchCounterScript(href);
+        }).then(html => ({ html }), error => ({ error }));
+        prefetchedPersonnelHtml.set(key, request);
+    }
+    return prefetchedPersonnelHtml.get(key);
+};
+const prepareTrainingBuilding = async (buildingId, desired) => {
+    const revision = educationRevision;
+    await loadEducationCounterForBuilding(buildingId);
+    if (revision !== educationRevision) return;
+    const span = getEducationCounterSpan(buildingId);
+    if (span?.dataset.educationLoaded === eduField.value &&
+        span.dataset.educationCounterFailed !== 'true' &&
+        countCoveredPersonnelForBuilding(buildingId) >= desired) return;
+    const heading = getPersonnelHeading(buildingId);
+    const body = getPersonnelBody(buildingId);
+    const href = heading?.getAttribute('href');
+    if (!href || !body) return;
+    if (unsafeWindow.loadedBuildings?.includes(href) &&
+        (parkedPersonnelRows.has(String(buildingId)) || body.querySelector('.schooling_checkbox'))) return;
+    // Prefetch text only. The response is inserted and its scripts run only
+    // when the sequential selection actually reaches this station.
+    await requestPersonnelHtml(buildingId, href, revision);
+};
+
 const loadPersonnelForBuilding = async buildingId => {
-    const panelBody = document.querySelector(
-        `.panel-body[building_id="${buildingId}"]`
-    );
-    const heading = document.querySelector(
-        `.personal-select-heading[building_id="${buildingId}"]`
-    );
+    const revision = educationRevision;
+    restorePersonnelRows(buildingId);
+    const panelBody = getPersonnelBody(buildingId);
+    const heading = getPersonnelHeading(buildingId);
     if (!panelBody || !heading) return;
     const href = heading.getAttribute('href');
     unsafeWindow.loadedBuildings ??= [];
 
     const prepareCheckboxes = () => {
         panelBody.querySelectorAll('.schooling_checkbox').forEach(checkbox => {
-            checkbox.setAttribute('building_id', buildingId.toString());
-            if (checkbox.dataset.jxnSelectionListener) return;
-            checkbox.dataset.jxnSelectionListener = 'true';
-            checkbox.addEventListener('change', () => {
+            if (checkbox.getAttribute('building_id') !== String(buildingId)) {
+                checkbox.setAttribute('building_id', String(buildingId));
+            }
+        });
+        if (!panelBody.dataset.jxnSelectionListener) {
+            panelBody.dataset.jxnSelectionListener = 'true';
+            panelBody.addEventListener('change', event => {
+                if (!event.target?.matches?.('.schooling_checkbox')) return;
                 updateSelectionCounter(buildingId);
                 updateSchoolingFree();
             });
-        });
+        }
     };
 
     const hasPersonnelCheckboxes = () =>
         panelBody.querySelector('.schooling_checkbox') !== null;
 
     if (!unsafeWindow.loadedBuildings.includes(href) || !hasPersonnelCheckboxes()) {
-        const html = await fetch(href).then(res => res.text());
+        const waitStartedAt = performance.now();
+        const response = await requestPersonnelHtml(buildingId, href, revision);
+        prefetchedPersonnelHtml.delete(revision + ':' + buildingId);
+        if (participantTimings) participantTimings.htmlWaitMs += performance.now() - waitStartedAt;
+        if (revision !== educationRevision) throw new Error('Auswahl abgebrochen.');
+        if (response.error) throw response.error;
+        const html = response.html;
+        const renderStartedAt = performance.now();
         $(panelBody).html(html);
         prepareCheckboxes();
-        disableAlreadyEducatedPersonnel();
+        disableAlreadyEducatedPersonnel(panelBody);
+        if (participantTimings) participantTimings.htmlApplyMs += performance.now() - renderStartedAt;
         if (!unsafeWindow.loadedBuildings.includes(href)) {
             unsafeWindow.loadedBuildings.push(href);
         }
     } else {
         prepareCheckboxes();
-        disableAlreadyEducatedPersonnel();
+        disableAlreadyEducatedPersonnel(panelBody);
     }
     updateSelectionCounter(buildingId);
 };
 
 const selectPersonnelForBuilding = async (buildingId, desiredTotal) => {
+    const revision = educationRevision;
     await loadEducationCounterForBuilding(buildingId);
-    await loadPersonnelForBuilding(buildingId);
+    if (revision !== educationRevision) throw new Error('Auswahl abgebrochen.');
     const desired = Math.max(0, parseInt(desiredTotal, 10) || 0);
+    const span = getEducationCounterSpan(buildingId);
+    const known = span?.dataset.educationLoaded === eduField.value &&
+        span.dataset.educationCounterFailed !== 'true';
+    const coveredBeforeLoad = countCoveredPersonnelForBuilding(buildingId);
+    if (known && coveredBeforeLoad >= desired) {
+        return { found: 0, enabled: 0, selected: countSelectedPersonnelForBuilding(buildingId),
+            covered: coveredBeforeLoad, desired };
+    }
+    await loadPersonnelForBuilding(buildingId);
+    if (revision !== educationRevision) throw new Error('Auswahl abgebrochen.');
     const covered = countCoveredPersonnelForBuilding(buildingId);
     let remaining = Math.max(0, desired - covered);
     const max = 10 * parseInt(roomsSelection.value || '0', 10);
-    const allCheckboxes = Array.from(
-        document.querySelectorAll(
-            `.schooling_checkbox[building_id="${buildingId}"]`
-        )
-    );
+    const allCheckboxes = getPersonnelCheckboxes(buildingId);
     allCheckboxes.forEach(checkbox => {
         checkbox.checked = false;
     });
     const checkboxes = allCheckboxes.filter(checkbox => !checkbox.disabled);
+    let selectedTotal = document.querySelectorAll('.schooling_checkbox:checked').length;
     const selectFrom = (candidates, strict = true) => {
-        candidates.forEach(checkbox => {
+        for (const checkbox of candidates) {
             if (remaining <= 0) {
-                return;
+                break;
             }
-            const selected = document.querySelectorAll(
-                '.schooling_checkbox:checked'
-            ).length;
-            if (selected >= max) return;
+            if (selectedTotal >= max) break;
             const isFree = strict ?
                 isPersonnelSelectableForTraining(checkbox)
             :   !checkbox.checked &&
@@ -1244,8 +1588,9 @@ const selectPersonnelForBuilding = async (buildingId, desiredTotal) => {
             if (isFree) {
                 checkbox.checked = true;
                 remaining--;
+                selectedTotal++;
             }
-        });
+        }
     };
     selectFrom(checkboxes, true);
     if (remaining > 0) {
@@ -1253,6 +1598,7 @@ const selectPersonnelForBuilding = async (buildingId, desiredTotal) => {
     }
     updateSelectionCounter(buildingId);
     updateSchoolingFree();
+    compactPersonnelRows(buildingId);
     return {
         found: allCheckboxes.length,
         enabled: checkboxes.length,
@@ -1261,6 +1607,23 @@ const selectPersonnelForBuilding = async (buildingId, desiredTotal) => {
         desired,
     };
 };
+
+async function processTrainingBuildings(buildings, capacity, hooks) {
+    let processed = 0;
+    for (let index = 0; index < buildings.length; index++) {
+        const building = buildings[index];
+        if (hooks.cancelled()) throw new Error('Auswahl abgebrochen.');
+        if (!hooks.hasSpace()) break;
+        const lookahead = Math.max(1, Math.min(10, Number(hooks.lookahead) || 3));
+        hooks.prepare?.(buildings.slice(index, index + lookahead));
+        hooks.progress(building, processed, buildings.length);
+        const result = await hooks.select(building.id, capacity);
+        if (hooks.cancelled()) throw new Error('Auswahl abgebrochen.');
+        hooks.result(building, result);
+        processed++;
+    }
+    return processed;
+}
 
 const renderKeywordAssigner = () => {
     if (keywordAssignerRendered) return;
@@ -1279,6 +1642,13 @@ const renderKeywordAssigner = () => {
       <button type="button" id="jxn_keyword_load" class="btn btn-default btn-sm">Wachen laden</button>
       <button type="button" id="jxn_keyword_add" class="btn btn-default btn-sm">Hinzufuegen</button>
       <button type="button" id="jxn_keyword_select" class="btn btn-success btn-sm">Auswaehlen</button>
+      <label style="display:flex;align-items:center;gap:4px;margin:0;font-weight:normal">
+        Parallel laden:
+        <select id="nilspe_training_parallelism" class="form-control input-sm" style="width:65px">
+          ${Array.from({ length: 10 }, (_, index) =>
+              `<option value="${index + 1}">${index + 1}</option>`).join('')}
+        </select>
+      </label>
       <span id="jxn_keyword_status" class="help-block" style="margin:0"></span>
     `;
     const existingHeading = document.querySelector(
@@ -1296,95 +1666,220 @@ const renderKeywordAssigner = () => {
 
     const filterInput = container.querySelector('#jxn_keyword_filter');
     const capacityInput = container.querySelector('#jxn_keyword_capacity');
+    const parallelismInput = container.querySelector('#nilspe_training_parallelism');
+    parallelismInput.value = String(participantParallelism);
+    parallelismInput.addEventListener('change', () => {
+        participantParallelism = normalizeParallelism(parallelismInput.value);
+        parallelismInput.value = String(participantParallelism);
+        queueCounterRequest.setLimit(participantParallelism);
+        GM_setValue(PARTICIPANT_PARALLELISM_KEY, participantParallelism);
+    });
+    const targetKey = 'nilspe_training_target_' + buildingType;
+    capacityInput.value = String(Math.max(1, Number(GM_getValue(targetKey, 1)) || 1));
+    capacityInput.addEventListener('change', () =>
+        GM_setValue(targetKey, Math.max(1, Number(capacityInput.value) || 1)));
+    const hideLabel = document.createElement('label');
+    hideLabel.style.cssText = 'display:flex;align-items:center;gap:4px;margin:0';
+    const hideAtTarget = document.createElement('input');
+    hideAtTarget.type = 'checkbox';
+    const hideKey = 'nilspe_hide_trained_' + buildingType;
+    hideAtTarget.checked = GM_getValue(hideKey, true) !== false;
+    hideAtTarget.addEventListener('change', () => GM_setValue(hideKey, hideAtTarget.checked));
+    hideLabel.append(hideAtTarget, document.createTextNode('Ausreichend ausgebildete Wachen ausblenden'));
+    container.append(hideLabel);
     const status = container.querySelector('#jxn_keyword_status');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    const cancelAction = document.createElement('button');
+    cancelAction.type = 'button';
+    cancelAction.className = 'btn btn-default btn-sm';
+    cancelAction.textContent = 'Abbrechen';
+    cancelAction.disabled = true;
+    container.append(cancelAction);
+    const showAll = document.createElement('button');
+    showAll.type = 'button';
+    showAll.className = 'btn btn-default btn-sm';
+    showAll.textContent = 'Alle Wachen anzeigen';
+    showAll.addEventListener('click', () => {
+        restorePersonnelPanels();
+        status.textContent = 'Originale Wachenliste eingeblendet. Stichwort-Auswaehlen bleibt auf deine geladenen Treffer begrenzt.';
+    });
+    container.append(showAll);
+    let keywordCancelled = false;
+    let lastCounterFailures = 0;
+    cancelAction.addEventListener('click', () => {
+        keywordCancelled = true;
+        educationRevision++;
+        prefetchedPersonnelHtml.clear();
+        for (const controller of activeCounterControllers) controller.abort();
+        cancelAction.disabled = true;
+        status.textContent = 'Wird abgebrochen …';
+    });
     const getDesiredCapacity = () =>
         Math.max(0, parseInt(capacityInput.value || '0', 10) || 0);
     const hideBuildingsAtTarget = async buildings => {
         const desired = getDesiredCapacity();
         if (!desired) return buildings;
 
+        const education = eduField.value;
+        const revision = educationRevision;
+        lastCounterFailures = 0;
+        // Visibility only uses already known counters. Never preflight all matches.
+        if (education !== eduField.value || revision !== educationRevision) {
+            throw new Error('Lehrgang wurde waehrend des Ladens gewechselt. Bitte erneut laden.');
+        }
         const remainingBuildings = [];
         for (const building of buildings) {
-            await loadEducationCounterForBuilding(building.id);
+            const span = getEducationCounterSpan(building.id);
             const covered = countCoveredPersonnelForBuilding(building.id);
-            const panel = document
-                .querySelector(
-                    `.personal-select-heading[building_id="${building.id}"]`
-                )
-                ?.closest('.panel');
-            if (covered >= desired) {
+            const panel = document.querySelector(
+                `.personal-select-heading[building_id="${building.id}"]`
+            )?.closest('.panel');
+            // Unknown counts are never a reason to hide a station.
+            const known = span?.dataset.educationLoaded === education &&
+                span.dataset.educationCounterFailed !== 'true';
+            if (hideAtTarget.checked && span?.dataset.educationCounterFailed === 'true') lastCounterFailures++;
+            if (hideAtTarget.checked && known && covered >= desired) {
                 panel?.style.setProperty('display', 'none');
+                if (panel) panel.dataset.nilspeHiddenAtTarget = 'true';
             } else {
                 panel?.style.removeProperty('display');
+                if (panel) delete panel.dataset.nilspeHiddenAtTarget;
                 remainingBuildings.push(building);
             }
         }
+        status.textContent = `${remainingBuildings.length} von ${buildings.length} Wachen offen` +
+            (lastCounterFailures ? ` – ${lastCounterFailures} Ausbildungsstaende unbekannt (weiter sichtbar)` : '');
         return remainingBuildings;
     };
+    const loadedKeywordBuildings = new Map();
     const loadMatching = async ({ append = false } = {}) => {
+        const startedAt = performance.now();
         const filter = filterInput.value.trim();
         if (!filter) {
             status.textContent = 'Bitte erst ein Stichwort eingeben.';
             filterInput.focus();
             return [];
         }
-        if (!append) clearRenderedBuildingPanels();
+        status.textContent = 'Wachendaten fuer Stichwortsuche laden …';
+        await ensureStaffBuildings();
+        if (keywordCancelled) throw new Error('Laden abgebrochen.');
+        if (!append) {
+            loadedKeywordBuildings.clear();
+            clearRenderedBuildingPanels();
+        }
         const buildings = getMatchingStaffBuildings(filterInput.value);
-        buildings.forEach(renderBuildingPanel);
+        buildings.forEach(building => loadedKeywordBuildings.set(String(building.id), building));
+        for (let index = 0; index < buildings.length; index++) {
+            if (keywordCancelled) throw new Error('Laden abgebrochen.');
+            renderBuildingPanel(buildings[index]);
+            if ((index + 1) % 100 === 0) {
+                status.textContent = `${index + 1} / ${buildings.length} Treffer anzeigen …`;
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
         ensureEducationCounterScrollListener();
         const remainingBuildings = await hideBuildingsAtTarget(buildings);
-        queueVisibleEducationCounters();
         status.textContent = buildings.length ?
-            `${remainingBuildings.length.toLocaleString('de')} von ${buildings.length.toLocaleString('de')} Wachen offen`
+            `${remainingBuildings.length.toLocaleString('de')} von ${buildings.length.toLocaleString('de')} Wachen angezeigt – Ausbildungspruefung bei Auswaehlen` +
+                (lastCounterFailures ? ` – ${lastCounterFailures} Ausbildungsstaende unbekannt (weiter sichtbar)` : '')
         :   'Keine Wachen zum Stichwort gefunden.';
+        status.textContent += ` (${((performance.now() - startedAt) / 1000).toFixed(1)} s)`;
         document.dispatchEvent(
             new CustomEvent('lehrgangszuweiser:render-personnel-selectors')
         );
         return remainingBuildings;
     };
-    const getRenderedBuildings = () =>
-        Array.from(
-            document.querySelectorAll('.personal-select-heading[building_id]')
-        )
-            .filter(heading => {
-                const panel = heading.closest('.panel');
-                return panel && panel.style.display !== 'none';
-            })
-            .map(heading =>
-                currentBuildings.find(
-                    building =>
-                        building.id.toString() ===
-                        heading.getAttribute('building_id')
-                )
-            )
-            .filter(Boolean);
-    container.querySelector('#jxn_keyword_load').addEventListener('click', async () => {
-        await loadMatching({ append: false });
+    // Only the explicit keyword selection belongs to this action. The game may
+    // keep thousands of unrelated station panels hidden in the same document.
+    const getRenderedBuildings = () => Array.from(loadedKeywordBuildings.values());
+    let keywordBusy = false;
+    const runKeywordAction = async task => {
+        if (keywordBusy) return;
+        keywordBusy = true;
+        keywordCancelled = false;
+        cancelAction.disabled = false;
+        status.textContent = 'Wachen werden geladen …';
+        const controls = Array.from(container.querySelectorAll('input, button, select'))
+            .filter(control => control !== cancelAction);
+        controls.forEach(control => { control.disabled = true; });
+        const educationWasDisabled = eduField.disabled;
+        eduField.disabled = true;
+        try {
+            await task();
+        } catch (error) {
+            console.error('[Lehrgangsmeister]', error);
+            status.textContent = keywordCancelled ? 'Abgebrochen.' : 'Fehler: ' + (error.message ?? error);
+        } finally {
+            keywordBusy = false;
+            prefetchedPersonnelHtml.clear();
+            participantTimings = null;
+            cancelAction.disabled = true;
+            if (keywordCancelled) status.textContent = 'Abgebrochen.';
+            controls.forEach(control => { control.disabled = false; });
+            eduField.disabled = educationWasDisabled;
+        }
+    };
+    form.addEventListener('submit', event => {
+        if (!keywordBusy) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        alert('Bitte warten, bis die Wachenauswahl abgeschlossen ist.');
+    }, true);
+    hideAtTarget.addEventListener('change', () => {
+        void runKeywordAction(() => hideBuildingsAtTarget(getRenderedBuildings()));
     });
-    container.querySelector('#jxn_keyword_add').addEventListener('click', async () => {
-        await loadMatching({ append: true });
+    container.querySelector('#jxn_keyword_load').addEventListener('click', () => {
+        void runKeywordAction(() => loadMatching({ append: false }));
+    });
+    container.querySelector('#jxn_keyword_add').addEventListener('click', () => {
+        void runKeywordAction(() => loadMatching({ append: true }));
     });
     container
         .querySelector('#jxn_keyword_select')
-        .addEventListener('click', async () => {
-            const buildings = await hideBuildingsAtTarget(getRenderedBuildings());
+        .addEventListener('click', () => {
+            void runKeywordAction(async () => {
+            const buildings = getRenderedBuildings();
             if (!buildings.length) {
                 status.textContent = 'Keine offenen Wachen zum Auswaehlen.';
                 return;
             }
             const capacity = getDesiredCapacity() || 1;
-            let processed = 0;
-            for (const building of buildings) {
-                status.textContent = `${building.caption} wird ausgewaehlt...`;
-                const result = await selectPersonnelForBuilding(building.id, capacity);
-                processed++;
-                if (!result.selected) {
-                    status.textContent = `${building.caption}: 0 ausgewaehlt (${result.found} gefunden, ${result.enabled} aktiv, ${result.covered}/${result.desired} vorhanden)`;
-                    await new Promise(resolve => setTimeout(resolve, 700));
+            const startedAt = performance.now();
+            participantTimings = { htmlWaitMs: 0, htmlApplyMs: 0 };
+            const processed = await processTrainingBuildings(buildings, capacity, {
+                lookahead: participantParallelism,
+                cancelled: () => keywordCancelled,
+                hasSpace: () => document.querySelectorAll('.schooling_checkbox:checked').length <
+                    10 * parseInt(roomsSelection.value || '0', 10),
+                progress: (building, count, total) => {
+                    status.textContent = `${count + 1} / ${total}: ${building.caption} pruefen und auswaehlen …`;
+                },
+                select: selectPersonnelForBuilding,
+                prepare: upcoming => {
+                    // Counter and HTML preparation share the configured request
+                    // limit. Selection stays strictly sequential.
+                    for (const building of upcoming) {
+                        void prepareTrainingBuilding(building.id, capacity).catch(console.error);
+                    }
+                },
+                result: (building, result) => {
+                    const panel = document.querySelector(
+                        `.personal-select-heading[building_id="${building.id}"]`
+                    )?.closest('.panel');
+                    if (hideAtTarget.checked && result.covered >= capacity && !result.selected) {
+                        panel?.style.setProperty('display', 'none');
+                        if (panel) panel.dataset.nilspeHiddenAtTarget = 'true';
+                    }
                 }
-
-            }
-            status.textContent = `${processed.toLocaleString('de')} Wachen verarbeitet`;
+            });
+            status.textContent = `${processed.toLocaleString('de')} von ${buildings.length} Wachen verarbeitet ` +
+                `(${((performance.now() - startedAt) / 1000).toFixed(1)} s, ${participantParallelism} parallel)`;
+            status.title = `Warten auf Personallisten: ${(participantTimings.htmlWaitMs / 1000).toFixed(1)} s; ` +
+                `Personaltabellen einsetzen: ${(participantTimings.htmlApplyMs / 1000).toFixed(1)} s`;
+            console.info('[Lehrgangsmeister] Teilnehmerauswahl', { ...participantTimings,
+                totalMs: performance.now() - startedAt, processed });
+            });
         });
 };
 
@@ -1400,52 +1895,23 @@ const loadSchools = () =>
     if (form) resolve();
     else reject();
 })
-    .then(() =>
-        Promise.all([
-            // fetch buildings from the original game API v2
-            ...(isAllianceSchool ?
-                [fetchAllianceBuildings(), fetchGameBuildings()]
-            :   [fetchGameBuildings()]),
-        ])
-    )
-    .then(
-        ([
-            ownOrAllianceBuildings,
-            buildings = ownOrAllianceBuildings,
-        ]) => {
-            const schoolCandidates = ownOrAllianceBuildings
-                .filter(b => b.building_type === buildingType)
-                .toSorted((a, b) => a.id - b.id);
-            const schools = getLimitedSchools(schoolCandidates);
-            return {
-            /** @type {Building[]} */
-            buildings,
-            /** @type {Building[]} */
-            schools,
-            };
-        }
-    )
+    .then(loadSchoolCatalogue)
+    .then(schools => ({ buildings: currentBuildings, schools }))
     .then(({ buildings, schools }) => {
         currentBuildings = buildings;
         currentSchools = schools;
+        roomLoadStatus.textContent = 'Raumauswahl aufbauen …';
+        const listStart = performance.now();
+        renderSpecificSchoolOptions(schools);
+        roomLoadMetrics.schoolListMs = performance.now() - listStart;
         setRoomSelection(schools);
         renderKeywordAssigner();
 
-        // fill specific school selection with available schools
-        specificSchoolSelection.replaceChildren();
-        schools.forEach(school => {
-            const freeRooms = getFreeRooms(school);
-            if (!freeRooms) return;
-            const option = document.createElement('option');
-            option.value = school.id.toString();
-            option.textContent = `${school.caption} (${freeRooms} Zimmer frei)`;
-            specificSchoolSelection.append(option);
-        });
-
         if (!schoolSelectionListenersAttached) {
-            useSpecificSchoolsCheckbox.addEventListener('change', () =>
-                setRoomSelection(currentSchools)
-            );
+            useSpecificSchoolsCheckbox.addEventListener('change', () => {
+                renderSpecificSchoolOptions(currentSchools);
+                setRoomSelection(currentSchools);
+            });
             roomLimitInput.addEventListener('change', () =>
                 setRoomSelection(currentSchools)
             );
@@ -1453,7 +1919,7 @@ const loadSchools = () =>
             let updateTimeout;
             specificSchoolSelection.addEventListener('change', () => {
                 if (updateTimeout) clearTimeout(updateTimeout);
-                setTimeout(() => setRoomSelection(currentSchools), 500);
+                updateTimeout = setTimeout(() => setRoomSelection(currentSchools), 500);
             });
             schoolSelectionListenersAttached = true;
         }
@@ -2223,10 +2689,29 @@ const loadSchools = () =>
             loadSchoolsButton.textContent = 'Neu laden';
             removePersonnelSelectionUi();
             updateSelectStyle();
+            const total = performance.now() - roomLoadStartedAt;
+            roomLoadMetrics.totalJsMs = total;
+            roomLoadStatus.textContent = `Daten bereit (${(total / 1000).toFixed(1)} s), Anzeige messen …`;
+            roomLoadStatus.title = `Speicher oeffnen: ${(roomLoadMetrics.openMs / 1000).toFixed(2)} s; ` +
+                `Aktualisierung inkl. Warten/Speichern: ${(roomLoadMetrics.apiMs / 1000).toFixed(2)} s; ` +
+                `Schulen lesen: ${(roomLoadMetrics.readMs / 1000).toFixed(2)} s; ` +
+                `Schulliste: ${(roomLoadMetrics.schoolListMs / 1000).toFixed(2)} s; ` +
+                `Dropdown: ${(roomLoadMetrics.dropdownMs / 1000).toFixed(2)} s`;
+            console.info('[Lehrgangsmeister] Raeume laden', { ...roomLoadMetrics, totalMs: total });
+            finishRoomPaintMeasurement(roomLoadRun);
         } else {
             loadSchoolsButton.textContent = 'Laden';
+            roomsSelection.disabled = true;
+            roomLoadStatus.textContent = 'Laden fehlgeschlagen';
         }
     });
+
+// Park the original full list before the first room load, not after it.
+removePersonnelSelectionUi();
+document.addEventListener('click', event => {
+    const heading = event.target?.closest?.('.personal-select-heading[building_id]');
+    if (heading) restorePersonnelRows(heading.getAttribute('building_id'));
+}, true);
 
 loadSchoolsButton.addEventListener('click', () => {
     if (schoolsLoading) return;
@@ -2236,10 +2721,17 @@ loadSchoolsButton.addEventListener('click', () => {
         return;
     }
     schoolsLoading = true;
+    roomLoadRun++;
+    roomMeasurementActive = true;
+    roomLongTasks.length = 0;
+    roomTaskObserver?.takeRecords();
+    roomLoadStartedAt = performance.now();
+    roomLoadMetrics = {};
+    roomsSelection.disabled = true;
     schoolsLoaded = false;
     loadSchoolsButton.disabled = true;
     loadSchoolsButton.textContent = 'Lade...';
-    roomLimitInput.dispatchEvent(new Event('change'));
+    GM_setValue(roomLimitInput.dataset.storageKey, getRoomLimit());
     spinner.style.removeProperty('display');
     loadSchools().catch(error => {
         console.error(error);
@@ -2247,7 +2739,3 @@ loadSchoolsButton.addEventListener('click', () => {
     });
 });
 })();
-
-
-
-
