@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         OLD Leitstelle Besatzungs-Checker
+// @name         Leitstelle Besatzungs-Checker
 // @namespace    NilsPe.assignment.checker
 // @version      1.0.4
 // @description  Prueft Soll- und Ist-Besatzung sichtbarer Fahrzeuge inklusive passender Ausbildung
