@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Assign Trailer
 // @namespace    NilsPe.assign.trailer
-// @version      2.5.0
+// @version      2.6.0
 // @description  Weist Anhänger festen, konfigurierten Zugfahrzeugen derselben Wache zu und korrigiert falsche/Zufalls-Zuweisungen
 // @author       NilsPe
 // @license      MIT
@@ -37,6 +37,7 @@
   };
 
   let running = false;
+  let cancelled = false;
 
   const sleep = ms =>
     new Promise(resolve => setTimeout(resolve, ms));
@@ -866,6 +867,7 @@
           : null;
 
       vehicles.push({
+        row,
         id,
         typeId,
         buildingId,
@@ -1096,7 +1098,7 @@
     let errors = 0;
 
     for (const trailer of trailers) {
-      if (!running) {
+      if (cancelled) {
         break;
       }
 
@@ -1163,6 +1165,62 @@
   // ============================================================
   // Reparaturplan
   // ============================================================
+
+  function inspectionResults(inspected) {
+    const towUsers = new Map();
+    for (const item of inspected) {
+      if (item.state.assigned && !item.state.random && item.state.towVehicleId) {
+        const ids = towUsers.get(item.state.towVehicleId) ?? [];
+        ids.push(item.trailer.id);
+        towUsers.set(item.state.towVehicleId, ids);
+      }
+    }
+    return inspected.map(item => {
+      const { state, currentTow, mapping, trailer } = item;
+      let message = 'Korrekt';
+      if (state.random) message = 'Zufallsfahrzeug aktiv';
+      else if (!state.assigned) message = 'Nicht zugewiesen';
+      else if (!currentTow) message = 'Zugfahrzeug nicht in sichtbarer Tabelle';
+      else if (currentTow.typeId !== mapping.towTypeId) message = 'Falscher Zugfahrzeugtyp';
+      else if (currentTow.buildingId !== trailer.buildingId) message = 'Zugfahrzeug falsche Wache';
+      else if ((towUsers.get(currentTow.id)?.length ?? 0) > 1) message = 'Zugfahrzeug mehrfach verwendet';
+      return { item, message, correct: message === 'Korrekt', towUsers };
+    });
+  }
+
+  function showInspectionResults(inspected, vehicles) {
+    const results = inspectionResults(inspected);
+    const setBadge = (vehicle, message, correct) => {
+      const cell = vehicle.row?.cells?.[vehicle.row.cells.length - 1];
+      if (!cell) return;
+      let badge = cell.querySelector('.nilspe-trailer-result');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.style.marginLeft = '6px';
+        cell.append(badge);
+      }
+      badge.className = 'nilspe-trailer-result label label-' + (correct ? 'success' : 'warning');
+      badge.textContent = message;
+    };
+    // Remove previous results, including rows no longer covered by the settings.
+    for (const vehicle of vehicles) {
+      vehicle.row?.querySelector('.nilspe-trailer-result')?.remove();
+    }
+    const towTypes = new Set(inspected.map(item => item.mapping.towTypeId));
+    const towUsers = results[0]?.towUsers ?? new Map();
+    for (const vehicle of vehicles) {
+      if (!towTypes.has(vehicle.typeId)) continue;
+      const users = towUsers.get(vehicle.id) ?? [];
+      const faulty = results.some(result =>
+        users.includes(result.item.trailer.id) && !result.correct);
+      setBadge(vehicle, users.length + ' gepruefte Anhaenger' +
+        (faulty ? ' – Zuweisung pruefen' : ''),
+        users.length === 1 && !faulty);
+    }
+    for (const result of results) {
+      setBadge(result.item.trailer, result.message, result.correct);
+    }
+  }
 
   function buildRepairPlan(
     inspected,
@@ -1404,7 +1462,7 @@
     cancel.addEventListener(
       'click',
       () => {
-        running = false;
+        cancelled = true;
 
         setProgress(
           'Abgebrochen',
@@ -1524,11 +1582,14 @@
   // Hauptlauf
   // ============================================================
 
-  async function run(buttons) {
+  async function run(buttons, checkOnly = false) {
     if (running) {
       return;
     }
 
+    running = true;
+    cancelled = false;
+    buttons.forEach(button => { button.disabled = true; });
     try {
       const config =
         await configuration();
@@ -1606,7 +1667,7 @@
           config.checkDelay
         );
 
-      if (!running) {
+      if (cancelled) {
         return;
       }
 
@@ -1633,6 +1694,29 @@
           inspected,
           vehicles
         );
+
+      showInspectionResults(inspected, vehicles);
+
+      if (checkOnly) {
+        setProgress(
+          'Pruefung fertig: ' + keep.length + ' korrekt, ' +
+          (plan.length + noTowVehicle.length) + ' auffaellig, ' +
+          checkErrors + ' Fehler',
+          inspected.length, checkErrors, inspected.length,
+          checkErrors || plan.length || noTowVehicle.length ? 'warning' : 'success'
+        );
+        return;
+      }
+
+      // Unknown assignments must not be treated as free tow vehicles.
+      if (checkErrors) {
+        setProgress(
+          'Keine Aenderungen: Pruefung unvollstaendig (' + checkErrors +
+          ' Fehler). Bitte erneut pruefen.',
+          inspected.length, checkErrors, inspected.length, 'warning'
+        );
+        return;
+      }
 
       if (!plan.length) {
         const message =
@@ -1674,7 +1758,7 @@
       );
 
       for (const assignment of plan) {
-        if (!running) {
+        if (cancelled) {
           break;
         }
 
@@ -1709,6 +1793,11 @@
           );
 
           changed++;
+          assignment.state = { assigned: true, random: false, towVehicleId: towVehicle.id };
+          assignment.currentTow = towVehicle;
+          const original = inspected.find(item => item.trailer.id === trailer.id);
+          if (original) { original.state = assignment.state; original.currentTow = towVehicle; }
+          showInspectionResults(inspected, vehicles);
 
           console.log(
             '[Assign Trailer] Korrigiert:',
@@ -1744,7 +1833,7 @@
         );
 
         if (
-          running &&
+          !cancelled &&
           config.requestDelay > 0
         ) {
           await sleep(
@@ -1753,7 +1842,7 @@
         }
       }
 
-      if (!running) {
+      if (cancelled) {
         return;
       }
 
@@ -1884,9 +1973,12 @@
     assignButton.textContent =
       'Anhänger zuweisen';
 
-    const buttons = [
-      assignButton
-    ];
+    const checkButton = document.createElement('button');
+    checkButton.type = 'button';
+    checkButton.className = 'btn btn-default btn-xs';
+    checkButton.textContent = 'Anhaenger pruefen';
+    const buttons = [assignButton, checkButton];
+    checkButton.addEventListener('click', () => { void run(buttons, true); });
 
     assignButton.addEventListener(
       'click',
@@ -1898,6 +1990,7 @@
     );
 
     group.append(
+      checkButton,
       assignButton,
       settingsButton()
     );
@@ -1964,3 +2057,4 @@
     );
 
 })();
+
