@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Leitstelle Assign Personal
 // @namespace    NilsPe.assign.personal
-// @version      1.0.5
-// @description  Weist den Fahrzeugen eines Gebaeudes automatisch die konfigurierte Besatzung zu
+// @version      2.0.0
+// @description  Prueft Fahrzeugbesatzungen und weist passendes Personal mit gemeinsamen Sollwerten zu
 // @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
@@ -139,6 +139,7 @@
     new Promise(resolve => setTimeout(resolve, milliseconds));
 
   let running = false;
+  let cancelled = false;
 
   async function createSettings() {
     if (typeof addOptions !== 'function') {
@@ -280,8 +281,8 @@
     cancel.className = 'btn btn-default btn-xs';
     cancel.textContent = 'Abbrechen';
     cancel.addEventListener('click', () => {
-      running = false;
-      setProgress('Abgebrochen', 0, 0, 'danger');
+      cancelled = true;
+      setProgress('Abbruch angefordert', 0, 0, 'danger');
     });
     const status = document.createElement('span');
     status.id = 'nilspe-assign-status';
@@ -321,10 +322,9 @@
     const element = row.querySelector(
       '[vehicle_type_id], [data-vehicle-type-id]'
     );
-    return Number(
-      element?.getAttribute('vehicle_type_id') ??
-      element?.getAttribute('data-vehicle-type-id')
-    );
+    const value = element?.getAttribute('vehicle_type_id') ??
+      element?.getAttribute('data-vehicle-type-id');
+    return value == null ? NaN : Number(value);
   }
 
   function rowCrew(row) {
@@ -336,7 +336,7 @@
   }
 
   async function loadConfiguration(rows) {
-    const types = [...new Set(rows.map(rowVehicleType).filter(Boolean))];
+    const types = [...new Set(rows.map(rowVehicleType).filter(Number.isInteger))];
     const targets = new Map();
 
     for (const type of types) {
@@ -423,7 +423,7 @@
     throw lastError ?? new Error('Personalanfrage fehlgeschlagen');
   }
 
-  async function adjustVehicle(job, configuration) {
+  async function adjustVehicle(job, configuration, checkOnly = false) {
     const documentFromResponse = await assignmentDocument(job.vehicleId);
     const qualification = QUALIFICATION_BY_VEHICLE_TYPE.get(job.vehicleType);
     const { assigned, available } = personnelRows(
@@ -431,10 +431,14 @@
       qualification
     );
     let assignedCount = assigned.length;
+    if (checkOnly || cancelled ||
+        (configuration.skipSatisfied && assignedCount >= job.target)) {
+      return assignedCount;
+    }
 
     if (assignedCount > job.target) {
       for (const row of [...assigned].reverse()) {
-        if (!running || assignedCount <= job.target) {
+        if (cancelled || assignedCount <= job.target) {
           break;
         }
 
@@ -447,7 +451,7 @@
 
     if (assignedCount < job.target) {
       for (const row of available) {
-        if (!running || assignedCount >= job.target) {
+        if (cancelled || assignedCount >= job.target) {
           break;
         }
 
@@ -461,14 +465,16 @@
     return assignedCount;
   }
 
-  async function runAssignment() {
+  async function runAssignment(checkOnly = false) {
     if (running) {
       return;
     }
 
     running = true;
-    const button = document.getElementById('nilspe-assign-button');
-    button?.classList.add('disabled');
+    cancelled = false;
+    const buttons = ['nilspe-assign-button', 'nilspe-personal-check-button']
+      .map(id => document.getElementById(id));
+    buttons.forEach(button => { if (button) button.disabled = true; });
 
     try {
       const rows = vehicleRows();
@@ -476,6 +482,7 @@
       const jobs = rows.map(row => {
         const vehicleType = rowVehicleType(row);
         return {
+          row,
           vehicleId: rowVehicleId(row),
           vehicleType,
           crew: rowCrew(row),
@@ -483,13 +490,8 @@
         };
       }).filter(job =>
         job.vehicleId &&
-        job.vehicleType &&
-        job.target > 0 &&
-        !(
-          configuration.skipSatisfied &&
-          job.crew &&
-          job.crew.current >= job.target
-        )
+        Number.isInteger(job.vehicleType) &&
+        job.target > 0
       );
 
       if (jobs.length === 0) {
@@ -500,12 +502,16 @@
       let completed = 0;
       let errors = 0;
       let shortages = 0;
+      let excess = 0;
 
       await runWithConcurrency(
         jobs,
         async job => {
           try {
-            const assigned = await adjustVehicle(job, configuration);
+            const assigned = await adjustVehicle(job, configuration, checkOnly);
+            if (cancelled) return;
+            displayCrewResult(job.row, job.target, assigned);
+            if (assigned > job.target) excess++;
 
             if (assigned < job.target) {
               shortages++;
@@ -533,29 +539,46 @@
           );
         },
         {
-          concurrency: 3,
+          // Process assignments sequentially: vehicles can share the same staff pool.
+          concurrency: checkOnly ? 3 : 1,
           delay: configuration.vehicleDelay,
-          shouldContinue: () => running
+          shouldContinue: () => !cancelled
         }
       );
 
-      if (!running) {
+      if (cancelled) {
+        setProgress('Abgebrochen', completed, jobs.length, 'warning');
         return;
       }
 
       setProgress(
-        `Fertig: ${completed} Fahrzeuge, ${shortages} unvollstaendig, ${errors} Fehler`,
+        `${checkOnly ? 'Pruefung fertig' : 'Zuweisung fertig'}: ${completed} Fahrzeuge, ${shortages} unter Soll, ${excess} ueber Soll, ${errors} Fehler`,
         completed,
         jobs.length,
-        errors || shortages ? 'warning' : 'success'
+        errors || shortages || excess ? 'warning' : 'success'
       );
     } catch (error) {
       console.error('[Leitstelle Assign Personal] Lauf fehlgeschlagen:', error);
       setProgress(`Fehler: ${error.message ?? error}`, 0, 0, 'danger');
     } finally {
       running = false;
-      button?.classList.remove('disabled');
+      buttons.forEach(button => { if (button) button.disabled = false; });
     }
+  }
+
+  function displayCrewResult(row, target, actual) {
+    const cell = row.cells?.[4];
+    if (!cell) return;
+    let badge = cell.querySelector('.nilspe-crew-result');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.style.marginLeft = '6px';
+      cell.append(badge);
+    }
+    badge.className = 'nilspe-crew-result label label-' +
+      (actual < target ? 'danger' : actual === target ? 'success' : 'warning');
+    badge.textContent = 'Soll: ' + target + ' | Ist: ' + actual;
+    badge.title = 'Zugewiesenes Personal mit passender Ausbildung';
   }
 
   function settingsButton() {
@@ -588,8 +611,14 @@
     start.type = 'button';
     start.className = 'btn btn-default btn-xs';
     start.textContent = 'Personal zuweisen';
-    start.addEventListener('click', runAssignment);
-    group.append(start, settingsButton());
+    start.addEventListener('click', () => runAssignment(false));
+    const check = document.createElement('button');
+    check.id = 'nilspe-personal-check-button';
+    check.type = 'button';
+    check.className = 'btn btn-default btn-xs';
+    check.textContent = 'Besatzung pruefen';
+    check.addEventListener('click', () => runAssignment(true));
+    group.append(check, start, settingsButton());
 
     const row = document.createElement('div');
     row.id = 'nilspe-assign-button-row';
@@ -612,3 +641,4 @@
     });
   }
 })();
+
