@@ -2,8 +2,8 @@
 // @name         LSS Wachen/Fhz Navigation Hotkeys
 // @namespace    NilsPe.Wachennavigation
 // @version      1.4.2
-// @license      BSD-3-Clause
-// @author       BOS-Ernie & NilsPe
+// @license      MIT
+// @author       NilsPe
 // @description  Hotkeys zum Navigieren zwischen Gebaeuden und Fahrzeugen.
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
