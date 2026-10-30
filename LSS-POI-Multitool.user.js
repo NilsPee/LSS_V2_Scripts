@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LSS POI-Multitool
 // @namespace    NilsPe.lss.poi.multitool
-// @version      1.0.1
+// @version      1.0.4
 // @description  POIs einzeln oder als konfigurierbare POI-Pakete vormerken, speichern und verwalten
 // @author       NilsPe
 // @license      MIT
@@ -27,7 +27,11 @@
     mode: 'package',
     selectedPois: [],
     delay: 200,
-    keepQueue: true
+    keepQueue: true,
+    gridSpacing: 500,
+    gridRows: 10,
+    gridCols: 10,
+    circleCount: 144
   };
   const COLORS = [
     '#2ecc71', '#e74c3c', '#f39c12', '#3498db', '#f1c40f', '#9b59b6',
@@ -36,6 +40,8 @@
 
   let settings = loadJson(STORAGE_KEY, DEFAULT_SETTINGS);
   let queue = settings.keepQueue ? loadJson(QUEUE_KEY, []) : [];
+  // Bereits gesendete Einträge aus v1.0.2 nicht erneut setzen.
+  queue = queue.filter(poi => !poi.saveUncertain);
   let typeCatalog = {};
   let previewMarkers = [];
   let busy = false;
@@ -334,6 +340,115 @@
     renderQueue();
   }
 
+  function gridNumber(key, min, max) {
+    const input = document.querySelector('#lss-poi-tools [data-grid="' + key + '"]');
+    const value = Number(input?.value);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      throw new Error('Bitte für ' + ({gridSpacing: 'Abstand', gridRows: 'Zeilen', gridCols: 'Spalten', circleCount: 'Kreis-Standorte'}[key]) + ' eine ganze Zahl von ' + min + ' bis ' + max + ' eingeben.');
+    }
+    settings[key] = value;
+    return value;
+  }
+
+  function gridOffsets(shape, rows, cols, count) {
+    if (shape === 'rectangle') {
+      return Array.from({length: rows * cols}, (_, i) => ({
+        x: i % cols, y: -Math.floor(i / cols)
+      }));
+    }
+    // Nächste Gitterpunkte zum Mittelpunkt; den letzten Ring gleichmäßig belegen.
+    const radius = Math.ceil(Math.sqrt(count)) + 1;
+    const rings = new Map();
+    for (let y = -radius; y <= radius; y++) {
+      for (let x = -radius; x <= radius; x++) {
+        const distance = x * x + y * y;
+        if (!rings.has(distance)) rings.set(distance, []);
+        rings.get(distance).push({x, y});
+      }
+    }
+    const result = [];
+    for (const distance of [...rings.keys()].sort((a, b) => a - b)) {
+      const ring = rings.get(distance);
+      const needed = count - result.length;
+      if (ring.length <= needed) {
+        result.push(...ring);
+      } else {
+        ring.sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+        for (let i = 0; i < needed; i++) {
+          result.push(ring[Math.floor(i * ring.length / needed)]);
+        }
+      }
+      if (result.length === count) break;
+    }
+    return result;
+  }
+
+  function gridCoordinates(center, offsets, spacing) {
+    return offsets.map(({x, y}) => {
+      const latitude = center.lat + y * spacing / 111320;
+      if (!Number.isFinite(latitude) || Math.abs(latitude) >= 85) {
+        throw new Error('Das Raster reicht zu weit in Richtung eines Pols. Bitte Abstand oder Standortanzahl verkleinern.');
+      }
+      const longitude = center.lon + x * spacing /
+        (111320 * Math.cos(latitude * Math.PI / 180));
+      return {
+        latitude: String(latitude),
+        longitude: String(((longitude + 180) % 360 + 360) % 360 - 180)
+      };
+    });
+  }
+
+  async function queueGrid(shape) {
+    if (busy) return;
+    let positions;
+    let types;
+    try {
+      const fields = getFields();
+      const latText = fields.lat?.value?.trim();
+      const lonText = fields.lon?.value?.trim();
+      const center = {lat: Number(latText), lon: Number(lonText)};
+      if (!latText || !lonText || !Number.isFinite(center.lat) ||
+          !Number.isFinite(center.lon) || Math.abs(center.lat) >= 85 ||
+          Math.abs(center.lon) > 180) {
+        throw new Error('Bitte zuerst eine gültige Position mit dem Kartenmarker wählen.');
+      }
+      types = selectedTypes(fields).filter(id => typeCatalog[id]);
+      if (!types.length) throw new Error('Bitte in den Einstellungen mindestens einen POI auswählen.');
+      const spacing = gridNumber('gridSpacing', 25, 100000);
+      const rows = shape === 'rectangle' ? gridNumber('gridRows', 1, 30) : 1;
+      const cols = shape === 'rectangle' ? gridNumber('gridCols', 1, 30) : 1;
+      const count = shape === 'circle' ? gridNumber('circleCount', 1, 10000) : rows * cols;
+      if (queue.length + count * types.length > 50000) {
+        throw new Error('Maximal 50.000 vorgemerkte POIs insgesamt. Bitte das Raster oder die POI-Auswahl verkleinern.');
+      }
+      positions = gridCoordinates(center, gridOffsets(shape, rows, cols, count), spacing);
+      saveSettings();
+    } catch (error) {
+      setStatus(escapeHtml(error.message), 'warning');
+      return;
+    }
+
+    busy = true;
+    updateButtons();
+    try {
+      for (let index = 0; index < positions.length; index++) {
+        const position = positions[index];
+        for (const type of types) {
+          queue.push({...position, poi_type: String(type)});
+          addPreview(Number(position.latitude), Number(position.longitude), type);
+        }
+        if ((index + 1) % 100 === 0) {
+          setStatus('<strong>Raster vormerken:</strong> ' + (index + 1) + '/' + positions.length + ' Standorte');
+          await sleep(0);
+        }
+      }
+    } finally {
+      busy = false;
+      updateButtons();
+      renderQueue();
+    }
+  }
+
   function resetQueue() {
     if (busy || !queue.length) return;
     if (!confirm(`${queue.length} vorgemerkte POIs verwerfen?`)) return;
@@ -349,60 +464,69 @@
     body.set('mission_position[latitude]', poi.latitude);
     body.set('mission_position[longitude]', poi.longitude);
     body.set('commit', 'Speichern');
-    return fetch('/mission_positions', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-CSRF-Token': csrfToken(),
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: body.toString()
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch('/mission_positions', {
+        method: 'POST',
+        credentials: 'include',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-CSRF-Token': csrfToken(),
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: body.toString()
+      });
+      // Redirect nicht abrufen; keine Erfolgsauswertung daraus ableiten.
+      if (response.type !== 'opaqueredirect' && !response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function saveQueued() {
     if (busy) return;
     if (!queue.length) {
-      alert('Es sind noch keine POIs vorgemerkt.');
+      setStatus('Es sind noch keine POIs vorgemerkt.');
       return;
     }
     busy = true;
     updateButtons();
-    let success = 0;
-    const failed = [];
     const items = [...queue];
-    for (let index = 0; index < items.length; index++) {
-      try {
-        const response = await requestSave(items[index]);
-        if (response.ok) success++;
-        else failed.push(items[index]);
-      } catch {
-        failed.push(items[index]);
+    let interrupted = false;
+    try {
+      for (let index = 0; index < items.length; index++) {
+        setStatus('<strong>Setze POIs:</strong> ' + (index + 1) + '/' + items.length);
+        await requestSave(items[index]);
+        queue.splice(queue.indexOf(items[index]), 1);
+        saveQueue();
+        if (index < items.length - 1) await sleep(settings.delay);
       }
-      setStatus(
-        `<strong>Speichere:</strong> ${index + 1}/${items.length} &nbsp; Erfolgreich: ${success} &nbsp; Fehler: ${failed.length}`,
-        failed.length ? 'warning' : ''
-      );
-      if (index < items.length - 1) await sleep(settings.delay);
+    } catch {
+      interrupted = true;
+    } finally {
+      busy = false;
+      updateButtons();
+      clearPreviews();
+      renderQueue();
     }
-    queue = failed;
-    clearPreviews();
-    restorePreviews();
-    renderQueue();
-    busy = false;
-    updateButtons();
-    if (failed.length) {
-      alert(`${success} POIs gespeichert, ${failed.length} fehlgeschlagen. Die fehlgeschlagenen Einträge bleiben vorgemerkt.`);
-    } else {
-      alert(`${success} POIs wurden erfolgreich gespeichert.`);
-      location.reload();
+    if (interrupted) {
+      restorePreviews();
+      setStatus('Vorgang unterbrochen. Bitte vor erneutem Senden die POI-Verwaltung prüfen; die letzte Anfrage könnte bereits verarbeitet worden sein.', 'warning');
+      return;
     }
+    // Einmal aktualisieren, nachdem alle POSTs ohne Redirect-GET beendet sind.
+    // Die leere Warteschlange ist bereits gespeichert; Vormerk-Marker entfallen.
+    location.reload();
   }
 
   function updateButtons() {
     document.querySelectorAll(
-      '#lss-poi-tools button, #lss-poi-manage-tools button'
+      '#lss-poi-tools button, #lss-poi-tools input, #lss-poi-tools select, #lss-poi-manage-tools button'
     ).forEach(button => {
       button.disabled = busy;
     });
@@ -701,6 +825,10 @@
       label[for="mission_position_poi_type"] { display:none !important; }
       #lss-poi-tools .lss-poi-actions { display:flex; flex-wrap:wrap; gap:6px; }
       #lss-poi-tools button { margin:0; }
+      .lss-poi-grid { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+      .lss-poi-grid label { display:flex; flex-direction:column; gap:3px; }
+      .lss-poi-grid input { width:110px; color:#222; }
+      .lss-poi-grid-hint { display:block; margin:6px 0; opacity:.85; }
       #lss-poi-mode { display:block; margin:8px 0 4px; opacity:.85; }
       .lss-poi-status { margin-top:8px; padding:7px; background:rgba(0,0,0,.25); border-radius:3px; }
       .lss-poi-status.warning { background:#8a6515; }
@@ -801,7 +929,16 @@
     const tools = document.createElement('div');
     tools.id = 'lss-poi-tools';
     tools.innerHTML = `
+      <div class="lss-poi-grid">
+        <label for="lss-poi-spacing">Abstand (m)<input id="lss-poi-spacing" data-grid="gridSpacing" type="number" min="25" max="100000" step="1"></label>
+        <label for="lss-poi-rows">Zeilen (Süden)<input id="lss-poi-rows" data-grid="gridRows" type="number" min="1" max="30" step="1"></label>
+        <label for="lss-poi-cols">Spalten (Osten)<input id="lss-poi-cols" data-grid="gridCols" type="number" min="1" max="30" step="1"></label>
+        <label for="lss-poi-circle">Kreis-Standorte<input id="lss-poi-circle" data-grid="circleCount" type="number" min="1" max="10000" step="1"></label>
+      </div>
+      <small class="lss-poi-grid-hint">Rechteck: ab Kartenmarker nach Süden/Osten. Kreis: gefülltes Raster um den Kartenmarker. Je Standort wird die aktuelle POI-Auswahl vorgemerkt.</small>
       <div class="lss-poi-actions">
+        <button type="button" class="btn btn-info" data-action="rectangle">Rechteck vormerken</button>
+        <button type="button" class="btn btn-info" data-action="circle">Kreis vormerken</button>
         <button type="button" class="btn btn-info" data-action="queue">POI vormerken (V)</button>
         <button type="button" class="btn btn-success" data-action="save">Alle speichern (S)</button>
         <button type="button" class="btn btn-warning" data-action="reset">Zurücksetzen (R)</button>
@@ -811,8 +948,22 @@
       <div id="lss-poi-status" class="lss-poi-status"></div>
       <div id="lss-poi-queue"></div>
     `;
+    tools.querySelectorAll('[data-grid]').forEach(input => {
+      const key = input.dataset.grid;
+      const value = Number(settings[key]);
+      input.value = String(Number.isInteger(value) && value >= Number(input.min) && value <= Number(input.max) ? value : DEFAULT_SETTINGS[key]);
+    });
+    tools.addEventListener('change', event => {
+      const input = event.target.closest('[data-grid]');
+      if (!input || busy) return;
+      if (input.value.trim() && input.checkValidity()) {
+        settings[input.dataset.grid] = Number(input.value);
+        saveSettings();
+      }
+    });
     tools.addEventListener('click', event => {
       const action = event.target.closest('button')?.dataset.action;
+      if (action === 'rectangle' || action === 'circle') queueGrid(action);
       if (action === 'queue') queueCurrentPosition();
       if (action === 'save') saveQueued();
       if (action === 'reset') resetQueue();
