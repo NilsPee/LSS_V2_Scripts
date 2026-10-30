@@ -10,7 +10,9 @@
 // @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-POI-Multitool.user.js
 // @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-POI-Multitool.user.js
 // @match        https://www.leitstellenspiel.de/pois*
+// @match        https://leitstellenspiel.de/pois*
 // @match        https://www.leitstellenspiel.de/mission_positions*
+// @match        https://leitstellenspiel.de/mission_positions*
 // @icon         https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
 // @run-at       document-idle
 // @grant        none
