@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LSS POI-Multitool
 // @namespace    NilsPe.lss.poi.multitool
-// @version      1.0.0
+// @version      1.0.1
 // @description  POIs einzeln oder als konfigurierbare POI-Pakete vormerken, speichern und verwalten
 // @author       NilsPe
 // @license      MIT
