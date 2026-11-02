@@ -1,296 +1,433 @@
+
 // ==UserScript==
 // @name            LSS Gebäude Reload-Blocker
 // @namespace       NilsPe.lss.building.reloadblocker
-// @version         1.0.0
+// @version         1.3.0
 // @license         MIT
 // @author          NilsPe
-// @description     Verhindert automatische Seiten-Reloads durch abgelaufene Timer in Gebäude- und Leitstellenansichten.
+// @description     Verhindert automatische Gebäude-Reloads durch ablaufende Spiel-Timer.
 // @homepageURL     https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL      https://github.com/NilsPee/LSS_V2_Scripts/issues
 // @downloadURL     https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Gebaeude-Reload-Blocker.user.js
 // @updateURL       https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Gebaeude-Reload-Blocker.user.js
 // @match           https://www.leitstellenspiel.de/buildings/*
 // @icon            https://raw.githubusercontent.com/NilsPee/Profil_Picture/main/NilsPe_Profile.png
-// @run-at          document-idle
+// @run-at          document-start
+// @inject-into     page
 // @grant           none
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    const PREFIX = '[LSS Reload-Blocker]';
-
-    console.log(`${PREFIX} wird initialisiert...`);
-
     /*
-     * 1. Einsatz-Countdown
-     *
-     * Original:
-     * missionCountdownOnTick(...)
-     * location.reload()
-     *
-     * Neu:
-     * Tick wird weiterhin ausgeführt,
-     * nur der anschließende Reload entfällt.
+     * Der eigentliche Patch wird im Seitenkontext
+     * ausgeführt, damit die lexikalische Variable
+     * TickManager erreichbar ist.
      */
-    function patchMissionCountdown() {
-        if (typeof window.registerMissionCountdownTimer !== 'function') {
-            return false;
-        }
 
-        window.registerMissionCountdownTimer = function (e, t, i) {
-            const n = `mission_countdown_${t}`;
-            const s = $(`#${t}`);
+    function pageScript() {
+        'use strict';
 
-            return TickManager.registerObject({
-                id: n,
-                elementId: t,
+        const PREFIX = '[LSS Reload-Blocker]';
+        const VERSION = '1.3.0';
 
-                onTick: ({
-                    id: e,
-                    params: t,
-                    remainingTime: i
-                }) => {
-                    missionCountdownOnTick(
-                        e,
-                        t.$element,
-                        i
-                    );
-                },
+        const STORAGE_KEY =
+            'LSS_ReloadBlocker_Diagnostics_V13';
 
-                onEnd: ({
-                    id: e,
-                    params: t,
-                    remainingTime: i
-                }) => {
-                    missionCountdownOnTick(
-                        e,
-                        t.$element,
-                        i
-                    );
-
-                    console.log(
-                        `${PREFIX} Mission-Countdown beendet – Reload verhindert`
-                    );
-                },
-
-                endDate: i,
-
-                params: {
-                    $element: s
-                }
-            });
+        const CFG = {
+            debug: true,
+            maxHistory: 100,
+            startupInterval: 20,
+            startupDuration: 30000,
+            maintenanceInterval: 2000
         };
 
-        console.log(
-            `${PREFIX} registerMissionCountdownTimer gepatcht`
-        );
-
-        return true;
-    }
-
-
-    /*
-     * 2. Gefangenentransport-Countdown
-     */
-    function patchPrisonerTransportation() {
-        if (
-            typeof window.registerPrisonerTransportationTimer !==
-            'function'
-        ) {
-            return false;
-        }
-
-        window.registerPrisonerTransportationTimer = function (e, t, i) {
-            const n = `prison_transportation_${e}`;
-            const s = $(`#${t}`);
-
-            return TickManager.registerObject({
-                id: n,
-                elementId: t,
-
-                onTick: ({
-                    id: e,
-                    params: t,
-                    remainingTime: i
-                }) => {
-                    missionPrisonerTransportationOnTick(
-                        e,
-                        t.$element,
-                        i
-                    );
-                },
-
-                onEnd: ({
-                    id: e,
-                    params: t,
-                    remainingTime: i
-                }) => {
-                    missionPrisonerTransportationOnTick(
-                        e,
-                        t.$element,
-                        i
-                    );
-
-                    console.log(
-                        `${PREFIX} Gefangenentransport beendet – Reload verhindert`
-                    );
-                },
-
-                endDate: i,
-
-                params: {
-                    $element: s
-                }
-            });
+        const TIMER_TYPES = {
+            mission_countdown_: 'Einsatz-Countdown',
+            prisoner_transportation_: 'Gefangenentransport',
+            complex_base_: 'Complex-Base'
         };
 
-        console.log(
-            `${PREFIX} registerPrisonerTransportationTimer gepatcht`
-        );
+        const patchedManagers = new WeakSet();
 
-        return true;
-    }
-
-
-    /*
-     * 3. Complex-Base-Timer
-     */
-    function patchComplexBaseTimer() {
-        if (typeof window.registerComplexBaseTimer !== 'function') {
-            return false;
-        }
-
-        window.registerComplexBaseTimer = function (e, t, i) {
-            const n = `complex_base_${e}`;
-            const s = $(`#${t}`);
-
-            return TickManager.registerObject({
-                id: n,
-                elementId: t,
-
-                onTick: ({
-                    id: e,
-                    params: t,
-                    remainingTime: i
-                }) => {
-                    timerUpdate(
-                        e,
-                        t.$element,
-                        i
-                    );
-                },
-
-                onEnd: ({
-                    id: e,
-                    params: t
-                }) => {
-                    timerUpdate(
-                        e,
-                        t.$element,
-                        -1
-                    );
-
-                    console.log(
-                        `${PREFIX} Complex-Base-Timer beendet – Reload verhindert`
-                    );
-                },
-
-                endDate: i,
-
-                params: {
-                    $element: s
-                }
-            });
+        const stats = {
+            patched: false,
+            registered: 0,
+            blocked: 0,
+            lastBlocked: null
         };
 
-        console.log(
-            `${PREFIX} registerComplexBaseTimer gepatcht`
-        );
-
-        return true;
-    }
-
-
-    /*
-     * 4. Fahrzeug-Umbau-Timer
-     */
-    function patchVehicleRefit() {
-        if (
-            typeof window.vehicleRefitCountdownInterval !==
-            'function'
-        ) {
-            return false;
+        function log(...args) {
+            if (CFG.debug) {
+                console.log(PREFIX, ...args);
+            }
         }
 
-        window.vehicleRefitCountdownInterval = function (e) {
-            setupTimerNew({
-                callerId: e,
-                $timer: $(`#${e}`),
+        function warn(...args) {
+            console.warn(PREFIX, ...args);
+        }
 
-                onTimerEnd: function (element) {
-                    element.text(
-                        I18n.t('javascript.few_seconds')
-                    );
+        function getHistory() {
+            try {
+                return JSON.parse(
+                    sessionStorage.getItem(STORAGE_KEY) || '[]'
+                );
+            } catch (_) {
+                return [];
+            }
+        }
 
-                    console.log(
-                        `${PREFIX} Fahrzeug-Umbau beendet – Reload verhindert`
+        function saveEvent(type, details = {}) {
+            const entry = {
+                time: new Date().toISOString(),
+                type,
+                page: location.pathname,
+                ...details
+            };
+
+            try {
+                const history = getHistory();
+
+                history.push(entry);
+
+                if (history.length > CFG.maxHistory) {
+                    history.splice(
+                        0,
+                        history.length - CFG.maxHistory
                     );
                 }
-            });
-        };
 
-        console.log(
-            `${PREFIX} vehicleRefitCountdownInterval gepatcht`
-        );
+                sessionStorage.setItem(
+                    STORAGE_KEY,
+                    JSON.stringify(history)
+                );
+            } catch (error) {
+                warn('Diagnose konnte nicht gespeichert werden:', error);
+            }
 
-        return true;
-    }
+            return entry;
+        }
 
+        function getManager() {
+            try {
+                return typeof TickManager !== 'undefined'
+                    ? TickManager
+                    : null;
+            } catch (_) {
+                return null;
+            }
+        }
 
-    /*
-     * ---------------------------------------------------------
-     * INITIALISIERUNG
-     * ---------------------------------------------------------
-     *
-     * Die Spiel-JavaScripts sind möglicherweise noch nicht
-     * vollständig geladen, wenn Tampermonkey startet.
-     *
-     * Deshalb warten wir, bis alle vier Funktionen existieren.
-     */
+        function getTimerType(id) {
+            if (typeof id !== 'string') {
+                return null;
+            }
 
-    let attempts = 0;
+            for (const [prefix, name] of Object.entries(TIMER_TYPES)) {
+                if (id.startsWith(prefix)) {
+                    return name;
+                }
+            }
 
-    const patcher = setInterval(() => {
+            return null;
+        }
 
-        attempts++;
+        /*
+         * TIMER-MANAGER PATCH
+         */
 
-        const results = [
-            patchMissionCountdown(),
-            patchPrisonerTransportation(),
-            patchComplexBaseTimer(),
-            patchVehicleRefit()
-        ];
+        function patchTickManager() {
+            const manager = getManager();
 
-        const success = results.filter(Boolean).length;
+            if (!manager ||
+                typeof manager.registerObject !== 'function') {
+                return false;
+            }
 
-        if (success === 4) {
+            if (patchedManagers.has(manager) &&
+                manager.registerObject.__lssReloadBlockerV13) {
+                stats.patched = true;
+                return true;
+            }
 
-            clearInterval(patcher);
+            const originalRegister = manager.registerObject;
 
-            console.log(
-                `${PREFIX} ✓ Alle 4 Reload-Quellen erfolgreich gepatcht`
+            if (originalRegister.__lssReloadBlockerV13) {
+                patchedManagers.add(manager);
+                stats.patched = true;
+                return true;
+            }
+
+            function patchedRegisterObject(options, ...args) {
+                if (!options || typeof options !== 'object') {
+                    return originalRegister.call(
+                        this,
+                        options,
+                        ...args
+                    );
+                }
+
+                const type = getTimerType(options.id);
+
+                if (!type ||
+                    typeof options.onEnd !== 'function') {
+                    return originalRegister.call(
+                        this,
+                        options,
+                        ...args
+                    );
+                }
+
+                const timerId = String(options.id);
+
+                stats.registered++;
+
+                saveEvent('timer_registered', {
+                    id: timerId,
+                    timerType: type
+                });
+
+                log('Timer registriert:', type, timerId);
+
+                const modified = {
+                    ...options,
+
+                    onEnd: function (data) {
+                        stats.blocked++;
+
+                        stats.lastBlocked = {
+                            id: timerId,
+                            type,
+                            time: new Date().toISOString()
+                        };
+
+                        saveEvent('timer_reload_blocked', {
+                            id: timerId,
+                            timerType: type
+                        });
+
+                        log(
+                            '✓ Automatischer Reload verhindert:',
+                            type,
+                            timerId
+                        );
+
+                        /*
+                         * Countdown-Anzeige aktualisieren.
+                         * Die originale onEnd-Funktion
+                         * wird NICHT ausgeführt, weil
+                         * sie location.reload() enthält.
+                         */
+
+                        if (typeof options.onTick === 'function') {
+                            try {
+                                options.onTick.call(this, {
+                                    ...(data || {}),
+                                    remainingTime: -1
+                                });
+                            } catch (error) {
+                                warn(
+                                    'Countdown-Aktualisierung fehlgeschlagen:',
+                                    timerId,
+                                    error
+                                );
+                            }
+                        }
+                    }
+                };
+
+                return originalRegister.call(
+                    this,
+                    modified,
+                    ...args
+                );
+            }
+
+            Object.defineProperty(
+                patchedRegisterObject,
+                '__lssReloadBlockerV13',
+                { value: true }
             );
 
-        } else if (attempts >= 100) {
+            try {
+                manager.registerObject = patchedRegisterObject;
 
-            clearInterval(patcher);
+                if (manager.registerObject !== patchedRegisterObject) {
+                    throw new Error(
+                        'registerObject konnte nicht ersetzt werden'
+                    );
+                }
 
+                patchedManagers.add(manager);
+                stats.patched = true;
+
+                saveEvent('patch_installed');
+
+                log('✓ TickManager erfolgreich gepatcht');
+
+                return true;
+            } catch (error) {
+                warn('TickManager-Patch fehlgeschlagen:', error);
+                return false;
+            }
+        }
+
+        /*
+         * DIAGNOSE
+         */
+
+        const navigationEntry =
+            performance.getEntriesByType('navigation')[0];
+
+        const navigationType = navigationEntry
+            ? navigationEntry.type
+            : 'unknown';
+
+        saveEvent('page_started', {
+            navigationType
+        });
+
+        if (navigationType === 'reload') {
+            log('Seite wurde neu geladen');
+
+            if (CFG.debug) {
+                console.table(getHistory().slice(-15));
+            }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            saveEvent('page_unloading');
+        });
+
+        /*
+         * STATUS-OBJEKT
+         */
+
+        window.LSSReloadBlocker = {
+            version: VERSION,
+            stats,
+
+            getStatus() {
+                const manager = getManager();
+
+                const active = !!(
+                    manager &&
+                    typeof manager.registerObject === 'function' &&
+                    manager.registerObject.__lssReloadBlockerV13
+                );
+
+                return {
+                    version: VERSION,
+                    managerFound: !!manager,
+                    patched: active,
+                    active,
+                    registered: stats.registered,
+                    blocked: stats.blocked,
+                    lastBlocked: stats.lastBlocked
+                };
+            },
+
+            history() {
+                const history = getHistory();
+                console.table(history);
+                return history;
+            },
+
+            lastEvents(count = 20) {
+                const events = getHistory().slice(-count);
+                console.table(events);
+                return events;
+            },
+
+            clearHistory() {
+                sessionStorage.removeItem(STORAGE_KEY);
+                log('Diagnoseverlauf gelöscht');
+            }
+        };
+
+        /*
+         * INITIALISIERUNG
+         */
+
+        function initialize() {
+            try {
+                patchTickManager();
+            } catch (error) {
+                warn('Initialisierungsfehler:', error);
+            }
+        }
+
+        initialize();
+
+        const fastCheck = setInterval(
+            initialize,
+            CFG.startupInterval
+        );
+
+        setTimeout(() => {
+            clearInterval(fastCheck);
+            log('Schnelle Initialisierung beendet');
+        }, CFG.startupDuration);
+
+        setInterval(
+            initialize,
+            CFG.maintenanceInterval
+        );
+
+        document.addEventListener(
+            'DOMContentLoaded',
+            initialize,
+            { once: true }
+        );
+
+        log('Version', VERSION, 'im Seitenkontext gestartet');
+    }
+
+    /*
+     * SEITENKONTEXT-INJEKTION
+     *
+     * Nicht über window.TickManager zugreifen:
+     * Der Manager liegt in einer lexikalischen
+     * Variable der Spielseite.
+     */
+
+    function inject() {
+        const root = document.documentElement;
+
+        if (!root) {
+            return false;
+        }
+
+        const script = document.createElement('script');
+
+        script.textContent =
+            '(' + pageScript.toString() + ')();';
+
+        root.appendChild(script);
+        script.remove();
+
+        if (!window.LSSReloadBlocker ||
+            window.LSSReloadBlocker.version !== '1.3.0') {
             console.warn(
-                `${PREFIX} Initialisierung beendet – ${success}/4 Funktionen gefunden`
+                '[LSS Reload-Blocker] Seitenkontext-Injektion konnte nicht bestätigt werden. Möglicherweise blockiert die Content-Security-Policy das Inline-Script.'
             );
         }
 
-    }, 100);
+        return true;
+    }
+
+    if (!inject()) {
+        const observer = new MutationObserver(() => {
+            if (inject()) {
+                observer.disconnect();
+            }
+        });
+
+        observer.observe(document, {
+            childList: true,
+            subtree: true
+        });
+    }
 
 })();
