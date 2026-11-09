@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         Leitstelle Assign Personal
 // @namespace    NilsPe.assign.personal
-// @version      2.2.0
-// @description  Gleicht Fahrzeugbesatzungen in zwei Phasen an, Sollwert 0 entfernt sämtliches zugewiesenes Personal
+// @version      2.3.0
+// @description  Personal zuweisen, entfernen oder beides in zwei Phasen
 // @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
@@ -24,12 +24,8 @@
   'use strict';
 
   const PREFIX = '[Leitstelle Assign Personal]';
-
   const SETTINGS_IDENTIFIER = 'nilspe_assign_personal';
   const TARGET_PREFIX = 'nilspe_assign_personal_target_';
-
-  // Neu: Unterscheidung zwischen leerem Feld und Sollwert 0.
-  // Bisher gespeicherte Zielwerte bleiben erhalten.
   const ZERO_PREFIX = 'nilspe_assign_personal_explicit_zero_';
 
   const KEYS = {
@@ -179,28 +175,28 @@
     [175, 'disaster_response_technology']
   ]);
 
-  const sleep = milliseconds =>
-    new Promise(resolve => setTimeout(resolve, milliseconds));
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
 
   let running = false;
   let cancelled = false;
 
   /*
-   * =====================================================
-   * ZIELWERTE LADEN UND SPEICHERN
-   * =====================================================
+   * ==========================================
+   * SOLLWERTE
+   * ==========================================
    *
    * null = Fahrzeugtyp ignorieren
    * 0    = Sämtliches Personal entfernen
-   * > 0  = Personal auf Sollwert bringen
-   *
-   * Alte gespeicherte 0-Werte bleiben unkonfiguriert,
-   * sofern keine explizite Null-Markierung existiert.
+   * >0   = Gewünschte Besatzung
    */
 
   async function getTarget(vehicleType) {
     const value = Number(
-      await GM.getValue(`${TARGET_PREFIX}${vehicleType}`, 0)
+      await GM.getValue(
+        `${TARGET_PREFIX}${vehicleType}`,
+        0
+      )
     );
 
     if (value > 0 && Number.isFinite(value)) {
@@ -219,8 +215,16 @@
     const text = String(rawValue ?? '').trim();
 
     if (text === '') {
-      await GM.setValue(`${TARGET_PREFIX}${vehicleType}`, 0);
-      await GM.setValue(`${ZERO_PREFIX}${vehicleType}`, false);
+      await GM.setValue(
+        `${TARGET_PREFIX}${vehicleType}`,
+        0
+      );
+
+      await GM.setValue(
+        `${ZERO_PREFIX}${vehicleType}`,
+        false
+      );
+
       return null;
     }
 
@@ -235,20 +239,23 @@
       Math.min(50, Math.trunc(parsed))
     );
 
-    if (target === 0) {
-      await GM.setValue(`${TARGET_PREFIX}${vehicleType}`, 0);
-      await GM.setValue(`${ZERO_PREFIX}${vehicleType}`, true);
-      return 0;
-    }
+    await GM.setValue(
+      `${TARGET_PREFIX}${vehicleType}`,
+      target
+    );
 
-    await GM.setValue(`${TARGET_PREFIX}${vehicleType}`, target);
-    await GM.setValue(`${ZERO_PREFIX}${vehicleType}`, false);
+    await GM.setValue(
+      `${ZERO_PREFIX}${vehicleType}`,
+      target === 0
+    );
 
     return target;
   }
 
   /*
+   * ==========================================
    * EINSTELLUNGEN
+   * ==========================================
    */
 
   async function createSettings() {
@@ -280,16 +287,24 @@
         {
           type: 'checkbox',
           key: KEYS.skipSatisfied,
-          label: 'Fahrzeuge mit exakt erreichter Zielbesatzung ueberspringen',
+          label: 'Fahrzeuge mit exakt erreichter Zielbesatzung überspringen',
           default: true
         }
       ]
     });
 
-    const panel = document.getElementById(SETTINGS_IDENTIFIER);
-    const body = panel?.querySelector('.settings-tab-body');
+    const panel = document.getElementById(
+      SETTINGS_IDENTIFIER
+    );
 
-    if (!body || document.getElementById('nilspe-assign-targets')) {
+    const body = panel?.querySelector(
+      '.settings-tab-body'
+    );
+
+    if (
+      !body ||
+      document.getElementById('nilspe-assign-targets')
+    ) {
       return;
     }
 
@@ -299,21 +314,20 @@
 
     const heading = document.createElement('h2');
     heading.textContent = 'Ziel-Besatzung je Fahrzeugtyp';
-    section.append(heading);
 
     const info = document.createElement('p');
     info.textContent =
-      'Leer = Fahrzeugtyp ignorieren | ' +
-      '0 = sämtliches Personal entfernen | ' +
+      'Leer = ignorieren | 0 = sämtliches Personal entfernen | ' +
       '1–50 = gewünschte Besatzung';
 
     info.style.fontSize = '12px';
     info.style.marginBottom = '12px';
 
-    section.append(info);
+    section.append(heading, info);
 
     for (const group of VEHICLE_GROUPS) {
       const wrapper = document.createElement('div');
+
       wrapper.style.padding = '8px 0 12px';
       wrapper.style.borderBottom = '1px solid #777';
 
@@ -331,6 +345,7 @@
 
       for (const [vehicleType, labelText] of group.vehicles) {
         const field = document.createElement('label');
+
         field.style.display = 'block';
         field.style.width = '115px';
         field.style.margin = '0';
@@ -341,6 +356,7 @@
         label.style.minHeight = '34px';
 
         const input = document.createElement('input');
+
         input.type = 'number';
         input.min = '0';
         input.max = '50';
@@ -368,6 +384,7 @@
             input.value = target === null
               ? ''
               : String(target);
+
           } catch (error) {
             console.error(
               PREFIX,
@@ -389,7 +406,9 @@
   }
 
   /*
+   * ==========================================
    * FORTSCHRITTSANZEIGE
+   * ==========================================
    */
 
   function ensureProgress() {
@@ -444,7 +463,12 @@
 
     cancel.addEventListener('click', () => {
       cancelled = true;
-      setProgress('Abbruch angefordert', 0, 0, 'danger');
+      setProgress(
+        'Abbruch angefordert',
+        0,
+        0,
+        'danger'
+      );
     });
 
     const status = document.createElement('span');
@@ -464,11 +488,21 @@
     document.body.append(container);
   }
 
-  function setProgress(message, completed, total, type = 'info') {
+  function setProgress(
+    message,
+    completed,
+    total,
+    type = 'info'
+  ) {
     ensureProgress();
 
-    const status = document.getElementById('nilspe-assign-status');
-    const fill = document.getElementById('nilspe-assign-fill');
+    const status = document.getElementById(
+      'nilspe-assign-status'
+    );
+
+    const fill = document.getElementById(
+      'nilspe-assign-fill'
+    );
 
     status.className = `label label-${type}`;
     status.textContent = message;
@@ -479,12 +513,19 @@
   }
 
   /*
+   * ==========================================
    * FAHRZEUGE ERMITTELN
+   * ==========================================
    */
 
   function vehicleRows() {
-    const table = document.getElementById('vehicle_table');
-    return Array.from(table?.tBodies?.[0]?.rows ?? []);
+    const table = document.getElementById(
+      'vehicle_table'
+    );
+
+    return Array.from(
+      table?.tBodies?.[0]?.rows ?? []
+    );
   }
 
   function rowVehicleId(row) {
@@ -511,7 +552,9 @@
       element?.getAttribute('vehicle_type_id') ??
       element?.getAttribute('data-vehicle-type-id');
 
-    return value == null ? NaN : Number(value);
+    return value == null
+      ? NaN
+      : Number(value);
   }
 
   function rowCrew(row) {
@@ -534,14 +577,18 @@
   async function loadConfiguration(rows) {
     const types = [
       ...new Set(
-        rows.map(rowVehicleType).filter(Number.isInteger)
+        rows.map(rowVehicleType)
+          .filter(Number.isInteger)
       )
     ];
 
     const targets = new Map();
 
     for (const type of types) {
-      targets.set(type, await getTarget(type));
+      targets.set(
+        type,
+        await getTarget(type)
+      );
     }
 
     return {
@@ -549,21 +596,36 @@
 
       personDelay: Math.max(
         0,
-        Number(await GM.getValue(KEYS.personDelay, 100))
+        Number(
+          await GM.getValue(
+            KEYS.personDelay,
+            100
+          )
+        )
       ),
 
       vehicleDelay: Math.max(
         0,
-        Number(await GM.getValue(KEYS.vehicleDelay, 100))
+        Number(
+          await GM.getValue(
+            KEYS.vehicleDelay,
+            100
+          )
+        )
       ),
 
       skipSatisfied:
-        await GM.getValue(KEYS.skipSatisfied, true) !== false
+        await GM.getValue(
+          KEYS.skipSatisfied,
+          true
+        ) !== false
     };
   }
 
   /*
-   * PERSONALZUWEISUNGEN LADEN
+   * ==========================================
+   * PERSONAL-LISTEN
+   * ==========================================
    */
 
   async function assignmentDocument(vehicleId) {
@@ -604,45 +666,56 @@
     ).includes(qualification);
   }
 
-  function personnelRows(documentFromResponse, qualification) {
+  function personnelRows(doc, qualification) {
     const rows = Array.from(
-      documentFromResponse.querySelectorAll('tr')
+      doc.querySelectorAll('tr')
     );
 
     const assigned = rows.filter(row =>
       row.querySelector('a.btn-assigned') &&
-      rowMatchesQualification(row, qualification)
+      rowMatchesQualification(
+        row,
+        qualification
+      )
     );
 
     const available = rows.filter(row => {
-      const button = row.querySelector('a.btn-success');
+      const button = row.querySelector(
+        'a.btn-success'
+      );
+
       const course =
         row.children?.[2]?.textContent.trim() ?? '';
 
       return (
         button &&
-        rowMatchesQualification(row, qualification) &&
+        rowMatchesQualification(
+          row,
+          qualification
+        ) &&
         !course.startsWith('Im Unterricht')
       );
     });
 
-    return { assigned, available };
+    return {
+      assigned,
+      available
+    };
   }
 
-  /*
-   * Alle zugewiesenen Personen unabhängig von ihrer
-   * Ausbildung erfassen.
-   *
-   * Wird bei einem Sollwert von 0 verwendet.
-   */
-
-  function allAssignedPersonnel(documentFromResponse) {
+  function allAssignedPersonnel(doc) {
     return Array.from(
-      documentFromResponse.querySelectorAll('tr')
+      doc.querySelectorAll('tr')
     ).filter(row =>
       row.querySelector('a.btn-assigned')
     );
   }
+
+  /*
+   * ==========================================
+   * PERSONAL-AKTIONEN
+   * ==========================================
+   */
 
   function requestHeaders() {
     return {
@@ -664,11 +737,14 @@
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const response = await fetch(link.href, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: requestHeaders()
-        });
+        const response = await fetch(
+          link.href,
+          {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: requestHeaders()
+          }
+        );
 
         if (response.ok) {
           return;
@@ -679,7 +755,9 @@
         );
 
         await sleep(
-          response.status === 429 ? 1000 : 250
+          response.status === 429
+            ? 1000
+            : 250
         );
 
       } catch (error) {
@@ -693,24 +771,32 @@
   }
 
   /*
-   * =====================================================
-   * ZWEI-PHASEN-VERARBEITUNG
-   * =====================================================
+   * ==========================================
+   * FAHRZEUG BEARBEITEN
+   * ==========================================
    *
-   * Phase 1:
-   * - Überbesetzungen reduzieren
-   * - Fahrzeuge mit Sollwert 0 vollständig leeren
+   * remove:
+   *   Nur Personal entfernen.
    *
-   * Phase 2:
-   * - Unterbesetzungen auffüllen
+   * assign:
+   *   Nur Personal zuweisen.
    *
-   * Bei Sollwert 0 werden alle zugewiesenen Personen
-   * unabhängig von ihrer Ausbildung entfernt.
+   * check:
+   *   Ausschließlich Ist-Besatzung prüfen.
+   *
+   * Sollwert 0:
+   *   Alle Personen unabhängig von Ausbildung
+   *   entfernen.
    */
 
-  async function adjustVehicle(job, configuration, phase) {
-    const documentFromResponse =
-      await assignmentDocument(job.vehicleId);
+  async function adjustVehicle(
+    job,
+    configuration,
+    phase
+  ) {
+    const doc = await assignmentDocument(
+      job.vehicleId
+    );
 
     const qualification =
       QUALIFICATION_BY_VEHICLE_TYPE.get(
@@ -718,12 +804,12 @@
       );
 
     const personnel = personnelRows(
-      documentFromResponse,
+      doc,
       qualification
     );
 
     const assigned = job.target === 0
-      ? allAssignedPersonnel(documentFromResponse)
+      ? allAssignedPersonnel(doc)
       : personnel.assigned;
 
     const available = personnel.available;
@@ -742,7 +828,7 @@
     }
 
     /*
-     * PHASE 1 – PERSONAL ENTFERNEN
+     * PHASE ENTFERNEN
      */
 
     if (phase === 'remove') {
@@ -758,8 +844,9 @@
           break;
         }
 
-        const link =
-          row.querySelector('a.btn-assigned');
+        const link = row.querySelector(
+          'a.btn-assigned'
+        );
 
         if (!link) continue;
 
@@ -781,16 +868,14 @@
     }
 
     /*
-     * PHASE 2 – PERSONAL ZUWEISEN
+     * PHASE ZUWEISEN
      */
 
     if (phase === 'assign') {
-      // Fahrzeuge mit Sollwert 0 bleiben leer.
-      if (job.target === 0) {
-        return assignedCount;
-      }
-
-      if (assignedCount >= job.target) {
+      if (
+        job.target === 0 ||
+        assignedCount >= job.target
+      ) {
         return assignedCount;
       }
 
@@ -802,8 +887,9 @@
           break;
         }
 
-        const link =
-          row.querySelector('a.btn-success');
+        const link = row.querySelector(
+          'a.btn-success'
+        );
 
         if (!link) continue;
 
@@ -828,10 +914,37 @@
   }
 
   /*
-   * HAUPTABLAUF
+   * ==========================================
+   * HAUPTABLAUF – VERSION 2.3.0
+   * ==========================================
+   *
+   * both:
+   *   Erst alle Fahrzeuge entfernen,
+   *   danach alle Fahrzeuge zuweisen.
+   *
+   * assign:
+   *   Nur die Zuweisungsphase.
+   *
+   * remove:
+   *   Nur die Entfernungsphase.
+   *
+   * check:
+   *   Besatzungen prüfen.
+   *
+   * Keine unnötige zweite Phase bei
+   * den Einzelmodi.
    */
 
-  async function runAssignment(checkOnly = false) {
+  async function runAssignment(mode = 'both') {
+    if (![
+      'both',
+      'assign',
+      'remove',
+      'check'
+    ].includes(mode)) {
+      return;
+    }
+
     if (running) {
       return;
     }
@@ -841,8 +954,12 @@
 
     const buttons = [
       'nilspe-assign-button',
+      'nilspe-assign-only-button',
+      'nilspe-remove-only-button',
       'nilspe-personal-check-button'
-    ].map(id => document.getElementById(id));
+    ].map(id =>
+      document.getElementById(id)
+    );
 
     buttons.forEach(button => {
       if (button) button.disabled = true;
@@ -850,6 +967,7 @@
 
     try {
       const rows = vehicleRows();
+
       const configuration =
         await loadConfiguration(rows);
 
@@ -862,8 +980,11 @@
           vehicleType,
           crew: rowCrew(row),
           target:
-            configuration.targets.get(vehicleType) ?? null
+            configuration.targets.get(
+              vehicleType
+            ) ?? null
         };
+
       }).filter(job =>
         job.vehicleId &&
         Number.isInteger(job.vehicleType) &&
@@ -882,22 +1003,38 @@
         return;
       }
 
-      let completed = 0;
-      let errors = 0;
-      let shortages = 0;
-      let excess = 0;
+      /*
+       * Passende Phasen auswählen.
+       *
+       * Nur bei "both" gibt es zwei Phasen.
+       */
 
-      const finalResults = new Map();
-      const failedVehicles = new Set();
+      let phases;
 
-      const phases = checkOnly
-        ? [
-            {
-              id: 'check',
-              label: 'Besatzung prüfen'
-            }
-          ]
-        : [
+      switch (mode) {
+        case 'assign':
+          phases = [{
+            id: 'assign',
+            label: 'Nur zuweisen'
+          }];
+          break;
+
+        case 'remove':
+          phases = [{
+            id: 'remove',
+            label: 'Nur entfernen'
+          }];
+          break;
+
+        case 'check':
+          phases = [{
+            id: 'check',
+            label: 'Besatzung prüfen'
+          }];
+          break;
+
+        default:
+          phases = [
             {
               id: 'remove',
               label: 'Phase 1/2 – Personal entfernen'
@@ -907,9 +1044,28 @@
               label: 'Phase 2/2 – Personal zuweisen'
             }
           ];
+      }
 
       const totalSteps =
         jobs.length * phases.length;
+
+      let completed = 0;
+      let errors = 0;
+      let shortages = 0;
+      let excess = 0;
+
+      const finalResults = new Map();
+      const failedVehicles = new Set();
+
+      console.log(
+        PREFIX,
+        'Modus gestartet:',
+        mode,
+        'Fahrzeuge:',
+        jobs.length,
+        'Phasen:',
+        phases.length
+      );
 
       for (const phase of phases) {
         if (cancelled) break;
@@ -922,12 +1078,14 @@
 
         console.log(
           PREFIX,
-          'Starte',
+          'Starte:',
           phase.label
         );
 
         const phaseJobs = jobs.filter(job =>
-          !failedVehicles.has(job.vehicleId)
+          !failedVehicles.has(
+            job.vehicleId
+          )
         );
 
         await runWithConcurrency(
@@ -937,18 +1095,28 @@
             try {
               if (cancelled) return;
 
-              const assigned = await adjustVehicle(
-                job,
-                configuration,
-                phase.id
-              );
+              const assigned =
+                await adjustVehicle(
+                  job,
+                  configuration,
+                  phase.id
+                );
 
               if (cancelled) return;
 
-              if (
-                phase.id === 'assign' ||
-                phase.id === 'check'
-              ) {
+              /*
+               * Bei beiden Phasen nur nach der
+               * Zuweisungsphase auswerten.
+               *
+               * Bei Einzelmodi direkt nach
+               * der einzigen Phase auswerten.
+               */
+
+              const finalPhase =
+                mode !== 'both' ||
+                phase.id === 'assign';
+
+              if (finalPhase) {
                 finalResults.set(
                   job.vehicleId,
                   assigned
@@ -974,6 +1142,7 @@
                 job.vehicleId,
                 error
               );
+
             } finally {
               completed++;
 
@@ -981,7 +1150,9 @@
                 `${phase.label}: ${completed}/${totalSteps}`,
                 completed,
                 totalSteps,
-                errors ? 'warning' : 'info'
+                errors
+                  ? 'warning'
+                  : 'info'
               );
             }
           },
@@ -995,7 +1166,7 @@
 
         console.log(
           PREFIX,
-          'Abgeschlossen:',
+          'Phase abgeschlossen:',
           phase.label
         );
       }
@@ -1010,6 +1181,10 @@
         return;
       }
 
+      /*
+       * Endergebnisse auswerten.
+       */
+
       for (const job of jobs) {
         if (!finalResults.has(job.vehicleId)) {
           continue;
@@ -1023,7 +1198,7 @@
 
           console.warn(
             PREFIX,
-            'Nicht genug passendes Personal:',
+            'Unter Soll:',
             job.vehicleId,
             `${assigned}/${job.target}`
           );
@@ -1037,9 +1212,14 @@
       const checkedVehicles =
         finalResults.size;
 
-      const statusText = checkOnly
-        ? 'Prüfung fertig'
-        : 'Zuweisung fertig';
+      const statusText =
+        mode === 'check'
+          ? 'Prüfung fertig'
+          : mode === 'remove'
+            ? 'Entfernen fertig'
+            : mode === 'assign'
+              ? 'Zuweisen fertig'
+              : 'Abgleich fertig';
 
       setProgress(
         `${statusText}: ${checkedVehicles} Fahrzeuge, ` +
@@ -1057,6 +1237,7 @@
         PREFIX,
         'Fertig:',
         {
+          mode,
           vehicles: checkedVehicles,
           shortages,
           excess,
@@ -1088,12 +1269,13 @@
   }
 
   /*
+   * ==========================================
    * ERGEBNIS ANZEIGEN
+   * ==========================================
    */
 
   function displayCrewResult(row, target, actual) {
     const cell = row.cells?.[4];
-
     if (!cell) return;
 
     let badge = cell.querySelector(
@@ -1120,17 +1302,15 @@
       'Soll: ' + target +
       ' | Ist: ' + actual;
 
-    badge.title = jobTargetTitle(target);
-  }
-
-  function jobTargetTitle(target) {
-    return target === 0
+    badge.title = target === 0
       ? 'Soll 0: Sämtliches Personal entfernen'
       : 'Zugewiesenes Personal mit passender Ausbildung';
   }
 
   /*
+   * ==========================================
    * EINSTELLUNGSBUTTON
+   * ==========================================
    */
 
   function settingsButton() {
@@ -1151,12 +1331,15 @@
   }
 
   /*
+   * ==========================================
    * BUTTONS IN DER LEITSTELLE
+   * ==========================================
    */
 
   function addButton() {
-    const table =
-      document.getElementById('vehicle_table');
+    const table = document.getElementById(
+      'vehicle_table'
+    );
 
     if (
       !table ||
@@ -1175,33 +1358,65 @@
     group.style.width = 'fit-content';
     group.style.margin = '0';
 
-    const start = document.createElement('button');
-    start.id = 'nilspe-assign-button';
-    start.type = 'button';
-    start.className = 'btn btn-default btn-xs';
-    start.textContent = 'Personal zuweisen';
+    /*
+     * Alle drei Modi als eigene Buttons.
+     * Kein Umstellen in den Einstellungen nötig.
+     */
 
-    start.addEventListener('click', () =>
-      runAssignment(false)
+    function createModeButton(
+      id,
+      label,
+      mode
+    ) {
+      const button = document.createElement('button');
+
+      button.id = id;
+      button.type = 'button';
+      button.className = 'btn btn-default btn-xs';
+      button.textContent = label;
+
+      button.addEventListener(
+        'click',
+        () => runAssignment(mode)
+      );
+
+      return button;
+    }
+
+    const check = createModeButton(
+      'nilspe-personal-check-button',
+      'Besatzung prüfen',
+      'check'
     );
 
-    const check = document.createElement('button');
-    check.id = 'nilspe-personal-check-button';
-    check.type = 'button';
-    check.className = 'btn btn-default btn-xs';
-    check.textContent = 'Besatzung prüfen';
+    const both = createModeButton(
+      'nilspe-assign-button',
+      'Entfernen + Zuweisen',
+      'both'
+    );
 
-    check.addEventListener('click', () =>
-      runAssignment(true)
+    const assign = createModeButton(
+      'nilspe-assign-only-button',
+      'Nur zuweisen',
+      'assign'
+    );
+
+    const remove = createModeButton(
+      'nilspe-remove-only-button',
+      'Nur entfernen',
+      'remove'
     );
 
     group.append(
       check,
-      start,
+      both,
+      assign,
+      remove,
       settingsButton()
     );
 
     const row = document.createElement('div');
+
     row.id = 'nilspe-assign-button-row';
     row.style.display = 'flex';
     row.style.width = '100%';
@@ -1218,13 +1433,13 @@
   }
 
   /*
+   * ==========================================
    * INITIALISIERUNG
+   * ==========================================
    */
 
   if (
-    location.pathname.startsWith(
-      '/settings/index'
-    )
+    location.pathname.startsWith('/settings/index')
   ) {
     await createSettings();
 
