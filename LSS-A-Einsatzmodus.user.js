@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         LSS A Einsatzmodus
-// @namespace    NoOne
+// @namespace    nilspe.einsatzmodus
 // @version      1.1.3
 // @license      MIT
 // @description  Blendet die Gebaeudeliste aus, waehrend Karte und Einsatzlisten aktiv bleiben.
-// @author       NoOne & NilsPe
+// @author       NilsPe
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
 // @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-A-Einsatzmodus.user.js

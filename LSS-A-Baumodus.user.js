@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         LSS A Baumodus
-// @namespace    NoOne
+// @namespace    nilspe.baumodus
 // @version      1.1.3
 // @license      MIT
 // @description  Reduziert Einsatzliste und Missions-Updates fuer fluessigeres Bauen.
-// @author       NoOne & NilsPe
+// @author       NilsPe
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
 // @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-A-Baumodus.user.js

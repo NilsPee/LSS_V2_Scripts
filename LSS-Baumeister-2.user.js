@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         LSS Baumeister 2.0
-// @namespace    bos-ernie.leitstellenspiel.de
-// @version      2.4.1
-// @license      BSD-3-Clause
-// @author       BOS-Ernie & NilsPe
-// @description  Baupositionen vormerken, Rechteck- und Kreisraster erstellen und nacheinander bauen.
+// @namespace    NilsPe.Baumeister.2.0
+// @version      2.5.3
+// @license      MIT
+// @author       NilsPe
+// @description  Baupositionen vormerken, Raster und Polygongebiete gleichmäßig belegen und nacheinander bauen.
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
 // @supportURL   https://github.com/NilsPee/LSS_V2_Scripts/issues
 // @downloadURL  https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/LSS-Baumeister-2.user.js
@@ -52,7 +52,8 @@
     "": [],
     "FW + THW + SEG": [0, 9, 12],
     "BePol + Polizei": [11, 6],
-    "RDKL x10": Array(10).fill(20)
+    "RDKL x10": Array(10).fill(20),
+    "FW + RD": [0, 2]
   };
 
   const GRID_SIZE_STORAGE_KEY = "lss_gitternetz_size_m";
@@ -66,6 +67,14 @@
   let rasterRowsInput = null;
   let rasterColsInput = null;
   let circleCountInput = null;
+
+  let polygonCountInput = null;
+  let polygonHint = null;
+  let polygonVertices = [];
+  let polygonLayer = null;
+  let polygonDrawing = false;
+  let polygonMap = null;
+  let polygonDoubleClickWasEnabled = false;
 
   let perKey = {};
   let planned = [];
@@ -483,6 +492,245 @@
   // --------------------------------------------------
   // Rechteckiges Gitternetz
   // --------------------------------------------------
+
+  // --------------------------------------------------
+  // Polygon zeichnen und gleichmäßig belegen (ohne Zusatzbibliothek)
+  // --------------------------------------------------
+
+  function polygonMessage(text) {
+    if (polygonHint) polygonHint.textContent = text;
+  }
+
+  function redrawPolygon() {
+    if (polygonLayer) polygonLayer.remove();
+    polygonLayer = null;
+    if (!polygonMap || !polygonVertices.length) return;
+    polygonLayer = L.layerGroup().addTo(polygonMap);
+    if (polygonVertices.length >= 2) {
+      const outline = polygonVertices.length >= 3
+        ? L.polygon(polygonVertices, { color: "#ffb300", weight: 3, fillOpacity: 0.12, interactive: false })
+        : L.polyline(polygonVertices, { color: "#ffb300", weight: 3, interactive: false });
+      polygonLayer.addLayer(outline);
+    }
+    polygonVertices.forEach((point, index) => {
+      const number = index + 1;
+      const icon = L.divIcon({
+        className: "baumeister-polygon-vertex",
+        html: '<span style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;box-sizing:border-box;border:2px solid #fff;border-radius:50%;background:#b45309;color:#fff;font:bold 14px Arial,sans-serif;box-shadow:0 1px 5px #000;">' + number + '</span>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      });
+      polygonLayer.addLayer(L.marker(point, {
+        icon,
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 2000,
+        title: "Eckpunkt " + number
+      }));
+    });
+  }
+
+  function stopPolygonDrawing() {
+    if (!polygonDrawing) return;
+    polygonDrawing = false;
+    if (polygonDoubleClickWasEnabled) polygonMap.doubleClickZoom.enable();
+    polygonMap.getContainer().style.cursor = polygonMap._baumeisterPreviousCursor || "";
+    document.removeEventListener("keydown", polygonKeyDown, true);
+  }
+
+  function addPolygonVertexFromMarker() {
+    if (!polygonDrawing) {
+      alert("Bitte zuerst Gebiet zeichnen anklicken.");
+      return;
+    }
+    const marker = window.building_new_marker;
+    if (!marker || typeof marker.getLatLng !== "function") {
+      alert("Baumarker nicht gefunden. Bitte das Baumenü öffnen.");
+      return;
+    }
+    polygonMapClick({ latlng: marker.getLatLng() });
+  }
+
+  function polygonMapClick(event) {
+    const last = polygonVertices[polygonVertices.length - 1];
+    if (last && polygonMap.distance(last, event.latlng) < 1) return;
+    polygonVertices.push({ lat: event.latlng.lat, lng: event.latlng.lng });
+    redrawPolygon();
+    polygonMessage(polygonVertices.length + " Eckpunkte gesetzt. Baumarker verschieben und E drücken; P schließt das Gebiet ab.");
+  }
+
+  function polygonKeyDown(event) {
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+    if (event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.target.isContentEditable) return;
+    const key = event.key.toLowerCase();
+    if (key === "e" || key === "p") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (key === "e") addPolygonVertexFromMarker();
+      else finishPolygon();
+      return;
+    }
+    if (event.key === "Escape") {
+      stopPolygonDrawing();
+      polygonMessage("Zeichnen pausiert. Gebiet abschließen oder neu zeichnen.");
+    }
+  }
+
+  function startPolygonDrawing() {
+    if (!window.map || typeof window.map.getContainer !== "function" || typeof L === "undefined") {
+      alert("Karte nicht verfügbar.");
+      return;
+    }
+    stopPolygonDrawing();
+    if (polygonLayer) polygonLayer.remove();
+    polygonLayer = null;
+    polygonVertices = [];
+    polygonMap = window.map;
+    polygonDrawing = true;
+    polygonDoubleClickWasEnabled = polygonMap.doubleClickZoom.enabled();
+    // Der vorhandene Baumarker bleibt normal verschiebbar.
+    polygonMap._baumeisterPreviousCursor = polygonMap.getContainer().style.cursor;
+
+    document.addEventListener("keydown", polygonKeyDown, true);
+    polygonMessage("Baumarker zur ersten Ecke verschieben und E drücken. Für jede weitere Ecke wiederholen. P schließt ab; Esc pausiert.");
+  }
+
+  function projectPolygon(vertices) {
+    const lat0 = vertices.reduce((sum, p) => sum + p.lat, 0) / vertices.length;
+    const lng0 = vertices.reduce((sum, p) => sum + p.lng, 0) / vertices.length;
+    const scaleX = 111320 * Math.cos(lat0 * Math.PI / 180);
+    return {
+      points: vertices.map(p => ({ x: (p.lng - lng0) * scaleX, y: (p.lat - lat0) * 111320 })),
+      unproject: p => ({ lat: lat0 + p.y / 111320, lng: lng0 + p.x / scaleX })
+    };
+  }
+
+  function polygonArea(points) {
+    return Math.abs(points.reduce((sum, a, i) => {
+      const b = points[(i + 1) % points.length];
+      return sum + a.x * b.y - b.x * a.y;
+    }, 0)) / 2;
+  }
+
+  function polygonIsSimple(points) {
+    const cross = (a, b, c) => (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+    const on = (a, b, c) => Math.abs(cross(a,b,c)) < 1e-6 &&
+      c.x >= Math.min(a.x,b.x)-1e-6 && c.x <= Math.max(a.x,b.x)+1e-6 &&
+      c.y >= Math.min(a.y,b.y)-1e-6 && c.y <= Math.max(a.y,b.y)+1e-6;
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i+1)%points.length];
+      if (Math.hypot(a.x-b.x,a.y-b.y) < 0.01) return false;
+      for (let j = i+1; j < points.length; j++) {
+        if (j === i+1 || (i === 0 && j === points.length-1)) continue;
+        const c = points[j], d = points[(j+1)%points.length];
+        if ((cross(a,b,c)*cross(a,b,d)<0 && cross(c,d,a)*cross(c,d,b)<0) ||
+          on(a,b,c) || on(a,b,d) || on(c,d,a) || on(c,d,b)) return false;
+      }
+    }
+    return true;
+  }
+
+  function pointInPolygon(p, vertices) {
+    let inside = false;
+    for (let i = 0, j = vertices.length-1; i < vertices.length; j = i++) {
+      const a = vertices[i], b = vertices[j];
+      if ((a.y > p.y) !== (b.y > p.y) &&
+        p.x < (b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x) inside = !inside;
+    }
+    return inside;
+  }
+
+  function finishPolygon() {
+    if (polygonVertices.length < 3) {
+      alert("Bitte mindestens drei Eckpunkte setzen.");
+      return false;
+    }
+    const points = projectPolygon(polygonVertices).points;
+    if (!polygonIsSimple(points) || polygonArea(points) < 1) {
+      alert("Das Gebiet muss eine Fläche bilden und darf sich nicht selbst überschneiden. Mit Eckpunkt zurück korrigieren oder neu zeichnen.");
+      return false;
+    }
+    stopPolygonDrawing();
+    redrawPolygon();
+    polygonMessage("Gebiet abgeschlossen (" + polygonVertices.length + " Eckpunkte). Sollanzahl eingeben und verteilen.");
+    return true;
+  }
+
+  function distributePolygon(vertices, count) {
+    const projection = projectPolygon(vertices);
+    const points = projection.points;
+    const area = polygonArea(points);
+    const minX = Math.min(...points.map(p => p.x)), maxX = Math.max(...points.map(p => p.x));
+    const minY = Math.min(...points.map(p => p.y)), maxY = Math.max(...points.map(p => p.y));
+    // Dichtes Dreiecksraster als Kandidaten; anschließend größte Lücken füllen.
+    let step = Math.sqrt(area / Math.max(count * 16, 1024));
+    let candidates = [];
+    for (let attempt = 0; attempt < 6; attempt++) {
+      candidates = [];
+      const dy = step * Math.sqrt(3) / 2;
+      const rows = Math.ceil((maxY-minY)/dy);
+      const cols = Math.ceil((maxX-minX)/step);
+      if (rows * cols > 2000000) throw new Error("Gebiet zu schmal oder komplex. Bitte in kleinere Gebiete aufteilen.");
+      for (let row = 0; row < rows; row++) {
+        const y = minY + (row+0.5)*dy;
+        for (let col = 0; col < cols; col++) {
+          const p = { x: minX + (col+0.25+(row%2)*0.5)*step, y };
+          if (pointInPolygon(p, points)) candidates.push(p);
+        }
+      }
+      if (candidates.length >= count) break;
+      step /= 2;
+    }
+    if (candidates.length < count) throw new Error("Nicht genügend Innenpunkte gefunden. Bitte das Gebiet neu zeichnen.");
+    const center = { x: (minX+maxX)/2, y: (minY+maxY)/2 };
+    const d2 = (a,b) => (a.x-b.x)**2+(a.y-b.y)**2;
+    let next = 0;
+    for (let i=1; i<candidates.length; i++) {
+      if (d2(candidates[i],center) < d2(candidates[next],center)) next=i;
+    }
+    const distances = new Float64Array(candidates.length).fill(Infinity);
+    const selected = [];
+    for (let n=0; n<count; n++) {
+      const chosen = candidates[next];
+      selected.push(projection.unproject(chosen));
+      distances[next] = -1;
+      let largest = -1;
+      for (let i=0; i<candidates.length; i++) {
+        if (distances[i] < 0) continue;
+        distances[i] = Math.min(distances[i], d2(candidates[i],chosen));
+        if (distances[i] > largest) { largest=distances[i]; next=i; }
+      }
+    }
+    return selected;
+  }
+
+  async function planPolygon() {
+    const count = Number(polygonCountInput?.value);
+    if (!Number.isInteger(count) || count < 1 || count > 1000) {
+      alert("Bitte 1 bis 1.000 Polygonpositionen eingeben.");
+      return;
+    }
+    if (!finishPolygon()) return;
+    const type = document.getElementById("building_building_type")?.value;
+    if (type == null) return;
+    const combo = document.getElementById("building_combo_type")?.value;
+    const fixedId = document.getElementById("building_leitstelle_building_id")?.value;
+    try {
+      const positions = distributePolygon(polygonVertices, count);
+      await ensureControlCenters();
+      if (!document.getElementById("new_building")) return;
+      let added = 0;
+      for (const p of positions) {
+        added += planAtPosition(p.lat, p.lng, type, combo,
+          fixedId || nearestControlCenterId(new Coordinate(p.lat,p.lng)));
+      }
+      localStorage.setItem("lss_polygon_count", String(count));
+      renderStatus("<b>Vorgemerkt:</b> " + planned.length + " (+" + added + " Gebäude an " + count + " Polygonpositionen)");
+      polygonMessage("Positionen als Vorschau hinzugefügt. Erneutes Verteilen fügt weitere Positionen hinzu. Gitternetz-Abstand gilt hier nicht.");
+    } catch (error) {
+      alert("Polygonverteilung: " + error.message);
+    }
+  }
 
   function planRasterFromCurrentMarker() {
     if (!window.building_new_marker) {
@@ -1253,6 +1501,17 @@
       circleCountInput.title
     );
 
+    // Polygon-Sollanzahl und Zeichenwerkzeuge
+    polygonCountInput = createNumberInput(localStorage.getItem("lss_polygon_count") || 50, 1, 1000);
+    polygonCountInput.step = "1";
+    const polygonWrapper = createField("Polygon-Anzahl", polygonCountInput, "custom_polygon_count",
+      "Anzahl Standorte im Polygon. Kombinationen werden pro Standort komplett vorgemerkt. Abstand wird automatisch berechnet.");
+    const polygonTools = document.createElement("div");
+    Object.assign(polygonTools.style, { display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "6px" });
+    polygonHint = document.createElement("div");
+    Object.assign(polygonHint.style, { marginBottom: "8px", fontSize: "12px" });
+    polygonMessage(polygonVertices.length >= 3 ? "Gezeichnetes Gebiet verfügbar." : "Gebiet zeichnen starten. Baumarker verschieben und E für jede Ecke drücken. P schließt ab. Danach Sollanzahl verteilen.");
+
     // Buttons
 
     const btnRow =
@@ -1282,6 +1541,32 @@
       }
 
       return button;
+    }
+
+    for (const [label, action] of [
+      ["Gebiet zeichnen", startPolygonDrawing],
+      ["Eckpunkt setzen (E)", addPolygonVertexFromMarker],
+      ["Eckpunkt zurück", () => {
+        polygonVertices.pop();
+        redrawPolygon();
+        polygonMessage(polygonVertices.length + " Eckpunkte. Gebiet abschließen oder neu zeichnen.");
+      }],
+      ["Gebiet abschließen (P)", finishPolygon],
+      ["Im Gebiet verteilen", planPolygon],
+      ["Gebiet löschen", () => {
+        stopPolygonDrawing();
+        polygonVertices = [];
+        redrawPolygon();
+        polygonMessage("Gebiet gelöscht. Bereits vorgemerkte Gebäude bleiben erhalten.");
+      }]
+    ]) {
+      const button = makeButton(label, "btn btn-info");
+      button.addEventListener("click", async e => {
+        e.preventDefault();
+        button.disabled = true;
+        try { await action(); } finally { button.disabled = false; }
+      });
+      polygonTools.appendChild(button);
     }
 
     const planBtn = makeButton(
@@ -1341,6 +1626,9 @@
       gridWrapper,
       rasterWrapper,
       circleWrapper,
+      polygonWrapper,
+      polygonTools,
+      polygonHint,
       btnRow,
       statusBox,
       legendBox
@@ -1462,6 +1750,7 @@
     if (
       !document.getElementById("new_building")
     ) {
+      stopPolygonDrawing();
       return;
     }
 
