@@ -1,7 +1,8 @@
+
 // ==UserScript==
 // @name         LSS A Einsatzmodus
 // @namespace    nilspe.einsatzmodus
-// @version      1.1.3
+// @version      1.1.6
 // @license      MIT
 // @description  Blendet die Gebaeudeliste aus, waehrend Karte und Einsatzlisten aktiv bleiben.
 // @author       NilsPe
@@ -19,77 +20,117 @@
   'use strict';
 
   const DEBUG = false;
+  const HEADER_ID = 'einsatzmodusWindowHeader';
+  const WINDOW_ID = 'buildings_outer';
 
   const log = (...args) => {
     if (DEBUG) console.log('[Einsatzmodus]', ...args);
   };
 
-  function isMainPage() {
-    return window.location.pathname === '/';
-  }
+  const isMainPage = () => location.pathname === '/';
 
-  function removeModeBanners() {
-    const remove = () => {
-      document.getElementById('einsatzmodusBanner')?.remove();
-      document.getElementById('baumodusBanner')?.remove();
-    };
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', remove, { once: true });
-    } else {
-      remove();
-    }
+  function removeOldBanners() {
+    document.getElementById('einsatzmodusBanner')?.remove();
+    document.getElementById('baumodusBanner')?.remove();
   }
 
   if (!isMainPage()) {
-    removeModeBanners();
-    log('Nicht auf der Hauptseite, Script inaktiv');
+    if (document.readyState === 'loading') {
+      document.addEventListener(
+        'DOMContentLoaded',
+        removeOldBanners,
+        { once: true }
+      );
+    } else {
+      removeOldBanners();
+    }
     return;
   }
 
-  /*
-   * Nur Elemente innerhalb des Gebäude-Panels ausblenden,
-   * die zur Gebäudeliste gehören.
-   *
-   * #buildings und #buildings_outer dürfen NICHT entfernt werden,
-   * da dies das komplette Gebäude-Panel betreffen würde.
-   */
-  function hideBuildingListCss() {
+  // ============================================
+  // CSS
+  // ============================================
+
+  function installCss() {
     GM_addStyle(`
-      /* Eigentliche Gebäudeliste */
-      #building_list {
-        display: none !important;
-        visibility: hidden !important;
-      }
-
-      /* Mobile Suchleiste über der Gebäudeliste */
-      #building_list_header_search_mobile {
-        display: none !important;
-        visibility: hidden !important;
-      }
-
-      /* Auswahl-/Filterknöpfe über der Gebäudeliste */
+      /* Gebäudeliste und originale Bedienelemente */
+      #building_list,
+      #building_list_header_search_mobile,
       #btn-group-building-select {
         display: none !important;
         visibility: hidden !important;
       }
 
-      /* Erfolgsmeldungen auf der Hauptseite ausblenden */
+      /* Erfolgsmeldungen wie bisher ausblenden */
       div.alert.alert-success[id^="alert_success_"] {
         display: none !important;
         visibility: hidden !important;
       }
 
       /*
-       * Verhindert unnötigen Leerraum, falls die Seite
-       * eine feste Höhe für den Panel-Inhalt setzt.
+       * Gebäudefenster vollständig leeren.
+       * Fensterkopf und Resize-Handles bleiben erhalten.
        */
-      #building_panel_body {
-        height: auto !important;
-        min-height: 0 !important;
+      #${WINDOW_ID} > :not(#${HEADER_ID}):not(.big_map_window_head):not(.ui-resizable-handle) {
+        display: none !important;
+      }
+
+      /* Neuer Header direkt im Gebäudefenster */
+      #${WINDOW_ID} > #${HEADER_ID} {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        position: relative !important;
+        box-sizing: border-box;
+        width: 100%;
+        margin: 0;
+        padding: 8px 10px;
+        background: #333;
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 3px;
+        text-align: center;
+        font: 600 12px/1.4 Arial, sans-serif;
+        z-index: 2;
       }
     `);
   }
+
+  // ============================================
+  // HEADER DIREKT IM GEBÄUDEFENSTER
+  // ============================================
+
+  function installWindowHeader() {
+    const outer = document.getElementById(WINDOW_ID);
+    if (!outer) return;
+
+    let header = document.getElementById(HEADER_ID);
+
+    if (!header) {
+      header = document.createElement('div');
+      header.id = HEADER_ID;
+      header.textContent =
+        'Einsatzmodus - Gebäudeliste ausgeblendet';
+    }
+
+    // Nicht mehr in #building_panel_body einsetzen,
+    // da dieser Bereich ausgeblendet werden kann.
+    if (header.parentElement !== outer) {
+      const titleBar = Array.from(outer.children).find(
+        child => child.matches('.big_map_window_head')
+      );
+
+      if (titleBar) {
+        titleBar.after(header);
+      } else {
+        outer.prepend(header);
+      }
+    }
+  }
+
+  // ============================================
+  // BISHERIGE GEBÄUDEBEREINIGUNG
+  // ============================================
 
   function removeBuildingList() {
     const ids = [
@@ -105,7 +146,9 @@
 
   function removeSuccessAlerts() {
     document
-      .querySelectorAll('div.alert.alert-success[id^="alert_success_"]')
+      .querySelectorAll(
+        'div.alert.alert-success[id^="alert_success_"]'
+      )
       .forEach(element => element.remove());
   }
 
@@ -131,78 +174,31 @@
     }
   }
 
-  function addBanner() {
-    const insert = () => {
-      if (!isMainPage()) {
-        removeModeBanners();
-        return;
-      }
-
-      if (
-        !document.body ||
-        document.getElementById('einsatzmodusBanner')
-      ) {
-        return;
-      }
-
-      const box = document.createElement('div');
-
-      box.id = 'einsatzmodusBanner';
-      box.textContent =
-        'Einsatzmodus aktiv - Gebäudeliste ausgeblendet.';
-
-      box.style.cssText = `
-        position: fixed;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 999999;
-        background: #222;
-        color: #fff;
-        border: 1px solid #555;
-        border-radius: 10px;
-        padding: 8px 14px;
-        font: 13px/1.3 Arial, sans-serif;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, .3);
-        pointer-events: none;
-      `;
-
-      document.body.appendChild(box);
-    };
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', insert, {
-        once: true
-      });
-    } else {
-      insert();
-    }
-  }
+  // ============================================
+  // DOM-BEOBACHTER
+  // ============================================
 
   function installDomCleaner() {
-    let cleanupPending = false;
+    let pending = false;
 
-    const cleanup = () => {
-      cleanupPending = false;
+    function cleanup() {
+      pending = false;
 
-      if (!isMainPage()) {
-        removeModeBanners();
-        return;
-      }
-
+      removeOldBanners();
       removeBuildingList();
       removeSuccessAlerts();
       keepMissionUiVisible();
-    };
+      installWindowHeader();
+    }
 
-    const scheduleCleanup = () => {
-      if (cleanupPending) return;
+    function scheduleCleanup() {
+      if (pending) return;
 
-      cleanupPending = true;
+      pending = true;
       requestAnimationFrame(cleanup);
-    };
+    }
 
-    const start = () => {
+    function start() {
       cleanup();
 
       const observer = new MutationObserver(scheduleCleanup);
@@ -213,24 +209,21 @@
       });
 
       log('DOM-Beobachter gestartet');
-    };
+    }
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', start, {
-        once: true
-      });
+      document.addEventListener(
+        'DOMContentLoaded',
+        start,
+        { once: true }
+      );
     } else {
       start();
     }
   }
 
-  function init() {
-    hideBuildingListCss();
-    installDomCleaner();
-    addBanner();
+  installCss();
+  installDomCleaner();
 
-    log('Einsatzmodus aktiv');
-  }
-
-  init();
+  log('Einsatzmodus 1.1.6 aktiv');
 })();
