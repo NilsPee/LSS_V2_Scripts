@@ -1,7 +1,8 @@
+
 // ==UserScript==
 // @name         LSS A Baumodus
 // @namespace    nilspe.baumodus
-// @version      1.1.3
+// @version      1.1.6
 // @license      MIT
 // @description  Reduziert Einsatzliste und Missions-Updates fuer fluessigeres Bauen.
 // @author       NilsPe
@@ -20,41 +21,43 @@
   'use strict';
 
   const pageWindow = unsafeWindow;
-
   const DEBUG = false;
+  const HEADER_ID = 'baumodusWindowHeader';
+  const WINDOW_ID = 'missions_outer';
 
   const log = (...args) => {
     if (DEBUG) console.log('[Baumodus]', ...args);
   };
 
-  function isMainPage() {
-    return window.location.pathname === '/';
-  }
+  const isMainPage = () => location.pathname === '/';
 
-  function removeModeBanners() {
-    const remove = () => {
-      document.getElementById('baumodusBanner')?.remove();
-      document.getElementById('einsatzmodusBanner')?.remove();
-    };
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', remove, { once: true });
-    } else {
-      remove();
-    }
+  function removeOldBanners() {
+    document.getElementById('baumodusBanner')?.remove();
+    document.getElementById('einsatzmodusBanner')?.remove();
   }
 
   if (!isMainPage()) {
-    removeModeBanners();
-    log('Nicht auf der Hauptseite, Script inaktiv');
+    if (document.readyState === 'loading') {
+      document.addEventListener(
+        'DOMContentLoaded',
+        removeOldBanners,
+        { once: true }
+      );
+    } else {
+      removeOldBanners();
+    }
     return;
   }
 
+  // ============================================
+  // MISSIONS-REQUESTS UNTERDRÜCKEN
+  // ============================================
+
   function isMissionUrl(url) {
     if (!url) return false;
+
     const text = String(url);
 
-    // Dinge, die ausdrücklich NICHT geblockt werden sollen
     if (
       text.includes('/api/buildings') ||
       text.includes('/buildings') ||
@@ -70,7 +73,6 @@
       return false;
     }
 
-    // Nur missionsbezogene Endpunkte
     return (
       /\/missions(\?|$|\/)/i.test(text) ||
       /\/mission_markers(\?|$|\/)/i.test(text) ||
@@ -82,20 +84,25 @@
 
   function installFetchBlocker() {
     const originalFetch = pageWindow.fetch;
+
     if (typeof originalFetch !== 'function') return;
 
     pageWindow.fetch = function (...args) {
       const resource = args[0];
+
       const url = typeof resource === 'string'
         ? resource
         : resource?.url || '';
 
       if (isMissionUrl(url)) {
         log('fetch geblockt:', url);
-        return Promise.resolve(new pageWindow.Response('', {
-          status: 204,
-          statusText: 'No Content'
-        }));
+
+        return Promise.resolve(
+          new pageWindow.Response(null, {
+            status: 204,
+            statusText: 'No Content'
+          })
+        );
       }
 
       return originalFetch.apply(this, args);
@@ -120,12 +127,14 @@
 
       xhr.open = function (method, url, ...rest) {
         blocked = isMissionUrl(url);
+
         if (blocked) {
           blockedReadyState = 1;
           xhr._baumodus_blocked_url = url;
           log('xhr geblockt:', url);
           return;
         }
+
         return originalOpen.call(this, method, url, ...rest);
       };
 
@@ -141,51 +150,81 @@
 
         setTimeout(() => {
           try {
-            if (typeof xhr.onreadystatechange === 'function') xhr.onreadystatechange();
+            if (typeof xhr.onreadystatechange === 'function') {
+              xhr.onreadystatechange();
+            }
           } catch {}
+
           try {
-            xhr.dispatchEvent?.(new pageWindow.Event('readystatechange'));
+            xhr.dispatchEvent?.(
+              new pageWindow.Event('readystatechange')
+            );
           } catch {}
+
           try {
-            if (typeof xhr.onload === 'function') xhr.onload();
+            if (typeof xhr.onload === 'function') {
+              xhr.onload();
+            }
           } catch {}
+
           try {
-            xhr.dispatchEvent?.(new pageWindow.Event('load'));
+            xhr.dispatchEvent?.(
+              new pageWindow.Event('load')
+            );
           } catch {}
+
           try {
-            xhr.dispatchEvent?.(new pageWindow.Event('loadend'));
+            xhr.dispatchEvent?.(
+              new pageWindow.Event('loadend')
+            );
           } catch {}
         }, 0);
       };
 
       Object.defineProperty(xhr, 'readyState', {
         get() {
-          return blocked ? blockedReadyState :
-            Object.getOwnPropertyDescriptor(OriginalXHR.prototype, 'readyState')?.get?.call(xhr) ?? 0;
+          return blocked
+            ? blockedReadyState
+            : Object.getOwnPropertyDescriptor(
+                OriginalXHR.prototype,
+                'readyState'
+              )?.get?.call(xhr) ?? 0;
         },
         configurable: true
       });
 
       Object.defineProperty(xhr, 'status', {
         get() {
-          return blocked ? blockedStatus :
-            Object.getOwnPropertyDescriptor(OriginalXHR.prototype, 'status')?.get?.call(xhr) ?? 0;
+          return blocked
+            ? blockedStatus
+            : Object.getOwnPropertyDescriptor(
+                OriginalXHR.prototype,
+                'status'
+              )?.get?.call(xhr) ?? 0;
         },
         configurable: true
       });
 
       Object.defineProperty(xhr, 'responseText', {
         get() {
-          return blocked ? blockedResponseText :
-            Object.getOwnPropertyDescriptor(OriginalXHR.prototype, 'responseText')?.get?.call(xhr) ?? '';
+          return blocked
+            ? blockedResponseText
+            : Object.getOwnPropertyDescriptor(
+                OriginalXHR.prototype,
+                'responseText'
+              )?.get?.call(xhr) ?? '';
         },
         configurable: true
       });
 
       Object.defineProperty(xhr, 'response', {
         get() {
-          return blocked ? blockedResponse :
-            Object.getOwnPropertyDescriptor(OriginalXHR.prototype, 'response')?.get?.call(xhr) ?? null;
+          return blocked
+            ? blockedResponse
+            : Object.getOwnPropertyDescriptor(
+                OriginalXHR.prototype,
+                'response'
+              )?.get?.call(xhr) ?? null;
         },
         configurable: true
       });
@@ -196,10 +235,69 @@
     pageWindow.XMLHttpRequest.prototype = OriginalXHR.prototype;
     pageWindow.XMLHttpRequest.UNSENT = OriginalXHR.UNSENT;
     pageWindow.XMLHttpRequest.OPENED = OriginalXHR.OPENED;
-    pageWindow.XMLHttpRequest.HEADERS_RECEIVED = OriginalXHR.HEADERS_RECEIVED;
+    pageWindow.XMLHttpRequest.HEADERS_RECEIVED =
+      OriginalXHR.HEADERS_RECEIVED;
     pageWindow.XMLHttpRequest.LOADING = OriginalXHR.LOADING;
     pageWindow.XMLHttpRequest.DONE = OriginalXHR.DONE;
   }
+
+  // ============================================
+  // CSS
+  // ============================================
+
+  function installCss() {
+    GM_addStyle(`
+      /* Bisherige Einsatzlisten ausblenden */
+      #missions-panel,
+      #missions-panel-main,
+      #mission_list,
+      #mission_list_alliance,
+      #mission_list_alliance_event,
+      #mission_list_sicherheitswache,
+      #mission_list_sicherheitswache_alliance,
+      #mission_list_combined,
+      .mission-panel,
+      .mission_side_bar,
+      .missionSideBar,
+      .mission-list,
+      .missionMarkerPanel,
+      div.alert.alert-success[id^="alert_success_"] {
+        display: none !important;
+        visibility: hidden !important;
+      }
+
+      /*
+       * Gesamte originale Einsatzoberfläche ausblenden.
+       * Nur der neue Header, die Fenster-Titelleiste
+       * und Resize-Handles bleiben erhalten.
+       */
+      #${WINDOW_ID} > :not(#${HEADER_ID}):not(.big_map_window_head):not(.ui-resizable-handle) {
+        display: none !important;
+      }
+
+      #${WINDOW_ID} > #${HEADER_ID} {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        position: relative !important;
+        box-sizing: border-box;
+        width: 100%;
+        margin: 0;
+        padding: 8px 10px;
+        background: #333;
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 3px;
+        text-align: center;
+        font: 600 12px/1.4 Arial, sans-serif;
+        z-index: 2;
+      }
+    `);
+  }
+
+  // ============================================
+  // EINSATZFENSTER BEREINIGEN
+  // ============================================
 
   function removeMissionUi() {
     const ids = [
@@ -226,121 +324,105 @@
     ];
 
     for (const selector of selectors) {
-      document.querySelectorAll(selector).forEach(el => el.remove());
+      document
+        .querySelectorAll(selector)
+        .forEach(element => element.remove());
     }
   }
 
   function removeSuccessAlerts() {
     document
-      .querySelectorAll('div.alert.alert-success[id^="alert_success_"]')
+      .querySelectorAll(
+        'div.alert.alert-success[id^="alert_success_"]'
+      )
       .forEach(element => element.remove());
   }
 
-  function hideMissionUiCss() {
-    GM_addStyle(`
-      #missions-panel,
-      #missions-panel-main,
-      #mission_list,
-      #mission_list_alliance,
-      #mission_list_alliance_event,
-      #mission_list_sicherheitswache,
-      #mission_list_sicherheitswache_alliance,
-      #mission_list_combined,
-      .mission-panel,
-      .mission_side_bar,
-      .missionSideBar,
-      .mission-list,
-      .missionMarkerPanel,
-      div.alert.alert-success[id^="alert_success_"] {
-        display: none !important;
-        visibility: hidden !important;
+  // ============================================
+  // HEADER DIREKT IM EINSATZFENSTER
+  // ============================================
+
+  function installWindowHeader() {
+    const outer = document.getElementById(WINDOW_ID);
+    if (!outer) return;
+
+    let header = document.getElementById(HEADER_ID);
+
+    if (!header) {
+      header = document.createElement('div');
+      header.id = HEADER_ID;
+      header.textContent =
+        'Baumodus - Einsatzliste ausgeblendet';
+    }
+
+    if (header.parentElement !== outer) {
+      const titleBar = Array.from(outer.children).find(
+        child => child.matches('.big_map_window_head')
+      );
+
+      if (titleBar) {
+        titleBar.after(header);
+      } else {
+        outer.prepend(header);
       }
-    `);
-  }
-
-  function addBanner() {
-    const insert = () => {
-      if (!isMainPage()) {
-        removeModeBanners();
-        return;
-      }
-
-      if (!document.body || document.getElementById('baumodusBanner')) return;
-
-      const box = document.createElement('div');
-      box.id = 'baumodusBanner';
-      box.textContent = 'Baumodus aktiv - Einsatzliste reduziert, Baumeister bleibt nutzbar.';
-      box.style.cssText = `
-        position: fixed;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 999999;
-        background: #222;
-        color: #fff;
-        border: 1px solid #555;
-        border-radius: 10px;
-        padding: 8px 14px;
-        font: 13px/1.3 Arial, sans-serif;
-        box-shadow: 0 2px 10px rgba(0,0,0,.3);
-        pointer-events: none;
-      `;
-      document.body.appendChild(box);
-    };
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', insert, { once: true });
-    } else {
-      insert();
     }
   }
 
+  // ============================================
+  // DOM-BEOBACHTER
+  // ============================================
+
   function installDomCleaner() {
-    let cleanupPending = false;
+    let pending = false;
 
-    const cleanup = () => {
-      cleanupPending = false;
+    function cleanup() {
+      pending = false;
 
-      if (!isMainPage()) {
-        removeModeBanners();
-        return;
-      }
-
+      removeOldBanners();
       removeMissionUi();
       removeSuccessAlerts();
-    };
+      installWindowHeader();
+    }
 
-    const scheduleCleanup = () => {
-      if (cleanupPending) return;
-      cleanupPending = true;
+    function scheduleCleanup() {
+      if (pending) return;
+
+      pending = true;
       requestAnimationFrame(cleanup);
-    };
+    }
 
-    const start = () => {
+    function start() {
       cleanup();
 
       const observer = new MutationObserver(scheduleCleanup);
+
       observer.observe(document.documentElement, {
         childList: true,
         subtree: true
       });
-    };
+
+      log('DOM-Beobachter gestartet');
+    }
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', start, { once: true });
+      document.addEventListener(
+        'DOMContentLoaded',
+        start,
+        { once: true }
+      );
     } else {
       start();
     }
   }
 
-  function init() {
-    hideMissionUiCss();
-    installFetchBlocker();
-    installXhrBlocker();
-    installDomCleaner();
-    addBanner();
-    log('Baumodus aktiv');
-  }
+  // ============================================
+  // START
+  // ============================================
 
-  init();
+  installCss();
+  installFetchBlocker();
+  installXhrBlocker();
+  installDomCleaner();
+
+  log('Baumodus 1.1.6 aktiv');
 })();
