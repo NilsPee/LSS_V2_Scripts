@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Fahrzeug Max-Personal
 // @namespace    NilsPe.vehicle.maxpersonal
-// @version      1.0.4
+// @version      1.1.0
 // @description  Setzt die maximale Personenanzahl konfigurierter Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -11,6 +11,8 @@
 // @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Vehicle-Max-Personal.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
+// @match        https://leitstellenspiel.de/buildings/*
+// @match        https://leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
@@ -24,10 +26,14 @@
 
   const SETTINGS_IDENTIFIER = 'nilspe_vehicle_max_personal';
   const CONFIG_KEY_PREFIX = 'nilspe_vmp_config_';
+  const DRAFT_KEY_PREFIX = 'nilspe_vmp_draft_';
+  const SELECTION_KEY_PREFIX = 'nilspe_vmp_selected_';
   const VEHICLE_DELAY_KEY = 'nilspe_vmp_vehicle_delay';
   const BUILDING_DELAY_KEY = 'nilspe_vmp_building_delay';
   const DEFAULT_VEHICLE_DELAY = 100;
   const DEFAULT_BUILDING_DELAY = 100;
+  let running = false;
+  let cancelled = false;
 
   const BUILDING_TYPES = [
     [0, 'Feuerwache'],
@@ -217,15 +223,18 @@
 
   async function saveConfiguration(buildingType, row) {
     const configuration = [];
+    const draft = [];
 
     for (const input of row.querySelectorAll('input[data-vehicle-type]')) {
       const vehicleType = Number(input.dataset.vehicleType);
       const maxPersonal = Number(input.value);
+      const selected = row.querySelector(`input[data-enabled-type="${vehicleType}"]`)?.checked;
 
       if (Number.isInteger(vehicleType) &&
           Number.isInteger(maxPersonal) &&
           maxPersonal > 0) {
-        configuration.push([vehicleType, maxPersonal]);
+        draft.push([vehicleType, maxPersonal]);
+        if (selected) configuration.push([vehicleType, maxPersonal]);
       }
     }
 
@@ -233,11 +242,11 @@
       configurationKey(buildingType),
       JSON.stringify(configuration)
     );
+    await GM.setValue(`${DRAFT_KEY_PREFIX}${buildingType}`, JSON.stringify(draft));
   }
 
-  async function createVehicleSettingsSection(panel) {
+  async function createVehicleSettingsSection(body) {
     const section = document.createElement('div');
-    section.style.margin = '15px';
     const heading = document.createElement('h2');
     heading.textContent = 'Max-Personal je Fahrzeugtyp';
     section.append(heading);
@@ -253,25 +262,81 @@
       }
 
       const stored = await loadConfiguration(buildingType.id);
-      const wrapper = document.createElement('div');
-      wrapper.className = 'form-group';
-      wrapper.style.paddingBottom = '12px';
-      wrapper.style.marginBottom = '12px';
-      wrapper.style.borderBottom = '1px solid #777';
-      const label = document.createElement('h3');
+      const draft = parseConfiguration(
+        await GM.getValue(`${DRAFT_KEY_PREFIX}${buildingType.id}`, '[]')
+      );
+      const wrapper = document.createElement('details');
+      wrapper.style.cssText = 'margin-bottom:7px;border:1px solid #8885;border-radius:4px';
+      const label = document.createElement('summary');
+      label.style.cssText = 'padding:9px 12px;cursor:pointer;background:#8882;font-weight:bold';
       label.textContent = `${buildingType.id} ${buildingType.label}`;
       const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.flexWrap = 'wrap';
-      row.style.gap = '12px';
+      row.style.padding = '10px';
+
+      const toolbar = document.createElement('div');
+      toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px';
+      const savedSelection = await GM.getValue(
+        `${SELECTION_KEY_PREFIX}${buildingType.id}`, null
+      );
+      let selectedIds;
+      try {
+        selectedIds = savedSelection === null ? null : JSON.parse(savedSelection);
+      } catch {
+        selectedIds = null;
+      }
+      const selected = new Set(
+        Array.isArray(selectedIds) ? selectedIds.map(Number) : stored.keys()
+      );
+      let saveQueue = Promise.resolve();
+      function save() {
+        const snapshot = [...selected];
+        saveQueue = saveQueue.catch(() => {}).then(async () => {
+          await GM.setValue(
+            `${SELECTION_KEY_PREFIX}${buildingType.id}`, JSON.stringify(snapshot)
+          );
+          await saveConfiguration(buildingType.id, row);
+        });
+        void saveQueue.catch(error =>
+          console.error('[Fahrzeug Max-Personal] Speichern fehlgeschlagen:', error)
+        );
+      }
+      function refresh() {
+        for (const field of row.querySelectorAll('[data-vehicle-row]')) {
+          const id = Number(field.dataset.vehicleRow);
+          const active = selected.has(id);
+          const checkbox = field.querySelector('input[data-enabled-type]');
+          const toggle = field.querySelector('button');
+          checkbox.checked = active;
+          field.style.background = active ? 'rgba(92, 184, 92, .10)' : '#8881';
+          field.style.borderColor = active ? 'rgba(92, 184, 92, .35)' : '#8885';
+          toggle.className = active ? 'btn btn-danger btn-xs' : 'btn btn-success btn-xs';
+          toggle.textContent = active ? '✕' : '✓';
+        }
+      }
+      for (const [text, active, color] of [
+        ['Alle auswählen', true, 'btn-success'],
+        ['Alle abwählen', false, 'btn-danger']
+      ]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-xs ${color}`;
+        button.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 110px;width:110px;height:28px;margin:0;padding:2px 6px;vertical-align:middle;white-space:nowrap;font-size:13px;line-height:1';
+        button.textContent = text;
+        button.addEventListener('click', () => {
+          selected.clear();
+          if (active) for (const option of options.values()) selected.add(option.id);
+          refresh();
+          save();
+        });
+        toolbar.append(button);
+      }
 
       for (const option of [...options.values()].sort((a, b) =>
         a.name.localeCompare(b.name, 'de')
       )) {
-        const field = document.createElement('label');
-        field.style.minWidth = '110px';
-        field.style.maxWidth = '180px';
-        field.textContent = option.name;
+        const field = document.createElement('div');
+        field.dataset.vehicleRow = String(option.id);
+        field.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;border:1px solid;border-radius:3px';
         const input = document.createElement('input');
         input.type = 'number';
         input.min = '0';
@@ -279,63 +344,81 @@
         input.className = 'form-control';
         input.style.width = '85px';
         input.dataset.vehicleType = String(option.id);
-        input.value = stored.get(option.id) ?? '';
-        input.addEventListener('change', () =>
-          saveConfiguration(buildingType.id, row)
-        );
-        field.append(input);
+        input.value = stored.get(option.id) ?? draft.get(option.id) ?? '';
+        input.addEventListener('change', save);
+        const name = document.createElement('span');
+        name.style.cssText = 'flex:1;cursor:pointer';
+        name.textContent = `${option.name} (${option.id})`;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.hidden = true;
+        checkbox.dataset.enabledType = String(option.id);
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:32px;height:28px;margin:0;padding:2px 5px;vertical-align:middle;font-size:13px;line-height:1';
+        function flip() {
+          if (selected.has(option.id)) selected.delete(option.id);
+          else selected.add(option.id);
+          refresh();
+          save();
+        }
+        name.addEventListener('click', flip);
+        toggle.addEventListener('click', flip);
+        field.append(input, name, checkbox, toggle);
         row.append(field);
       }
 
-      wrapper.append(label, row);
+      refresh();
+      wrapper.append(label, toolbar, row);
       section.append(wrapper);
     }
 
-    const body = panel.querySelector('.settings-tab-body');
-
-    if (body) {
-      const firstHeading = body.querySelector('h2');
-      body.insertBefore(section, firstHeading ?? body.firstChild);
-    }
+    body.prepend(section);
   }
 
   async function createSettings() {
-    if (typeof addOptions !== 'function') {
-      const warning = document.createElement('div');
-      warning.className = 'alert alert-danger';
-      warning.textContent = 'Fahrzeug Max-Personal: NilsPe-Skriptbasis fehlt.';
-      (document.querySelector('.container') ?? document.body).prepend(warning);
+    if (typeof waitForSettingsDom !== 'function' ||
+        typeof createSettingsPane !== 'function') {
+      console.error('[Fahrzeug Max-Personal] NilsPe-Skriptbasis fehlt.');
       return;
     }
+    if (!await waitForSettingsDom()) return;
+    const { anchor, body } = createSettingsPane(
+      SETTINGS_IDENTIFIER, 'Fahrzeug Max-Personal'
+    );
+    let rendered = false;
+    anchor.addEventListener('click', () => void renderSettings());
 
-    await addOptions({
-      identifier: SETTINGS_IDENTIFIER,
-      title: 'Fahrzeug Max-Personal',
-      settings: [
-        { type: 'header', text: 'Ablauf' },
-        {
-          type: 'number',
-          key: VEHICLE_DELAY_KEY,
-          label: 'Pause nach einer Fahrzeug-Aenderung [ms]',
-          default: DEFAULT_VEHICLE_DELAY,
-          min: 0,
-          max: 5_000
-        },
-        {
-          type: 'number',
-          key: BUILDING_DELAY_KEY,
-          label: 'Pause nach einem Gebaeude [ms]',
-          default: DEFAULT_BUILDING_DELAY,
-          min: 0,
-          max: 5_000
-        }
-      ]
-    });
-
-    const panel = document.getElementById(SETTINGS_IDENTIFIER);
-
-    if (panel) {
-      await createVehicleSettingsSection(panel);
+    async function renderSettings() {
+      if (rendered) return;
+      rendered = true;
+      await createVehicleSettingsSection(body);
+      const heading = document.createElement('h2');
+      heading.textContent = 'Ablauf';
+      body.append(heading);
+      for (const [key, label, fallback] of [
+        [VEHICLE_DELAY_KEY, 'Pause nach einer Fahrzeugänderung [ms]', DEFAULT_VEHICLE_DELAY],
+        [BUILDING_DELAY_KEY, 'Pause nach einem Gebäude [ms]', DEFAULT_BUILDING_DELAY]
+      ]) {
+        const field = document.createElement('label');
+        field.style.cssText = 'display:block;margin:8px 0;font-weight:normal';
+        const caption = document.createElement('strong');
+        caption.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '5000';
+        input.className = 'form-control input-sm';
+        input.style.width = '130px';
+        input.value = String(await GM.getValue(key, fallback));
+        input.addEventListener('change', () => {
+          const value = Math.min(5000, Math.max(0, Number(input.value) || 0));
+          input.value = String(value);
+          void GM.setValue(key, value);
+        });
+        field.append(caption, input);
+        body.append(field);
+      }
     }
   }
 
@@ -505,23 +588,52 @@
     const style = document.createElement('style');
     style.id = 'nilspe-vmp-style';
     style.textContent = `
-      #nilspe-vmp-progress { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483000; padding: 7px 12px; border-top: 1px solid #ddd; background: #f8f8f8; }
-      #nilspe-vmp-track { height: 12px; margin-top: 5px; overflow: hidden; border-radius: 4px; background: #ddd; }
+      #nilspe-vmp-progress { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483000; padding: 9px 12px; border-top: 1px solid #888; background: #333; color: #fff; }
+      #nilspe-vmp-row { display:flex;align-items:center;gap:10px;flex-wrap:wrap }
+      #nilspe-vmp-statistics { display:flex;flex-wrap:wrap;gap:20px;margin-top:6px;font-size:12px }
+      #nilspe-vmp-track { height: 12px; margin-top: 6px; overflow: hidden; border-radius: 4px; background: #777; }
       #nilspe-vmp-fill { height: 100%; width: 0; background: #5cb85c; }
     `;
     document.head.append(style);
     const container = document.createElement('div');
     container.id = 'nilspe-vmp-progress';
+    const row = document.createElement('div');
+    row.id = 'nilspe-vmp-row';
+    const stop = document.createElement('button');
+    stop.id = 'nilspe-vmp-stop';
+    stop.type = 'button';
+    stop.className = 'btn btn-danger btn-xs';
+    stop.textContent = 'Abbrechen';
+    stop.addEventListener('click', () => {
+      cancelled = true;
+      stop.disabled = true;
+      document.getElementById('nilspe-vmp-status').textContent =
+        'Abbruch – laufende Anfrage wird beendet...';
+    });
     const status = document.createElement('span');
     status.id = 'nilspe-vmp-status';
     status.className = 'label label-info';
     status.textContent = 'Bereit';
+    const close = document.createElement('button');
+    close.id = 'nilspe-vmp-close';
+    close.type = 'button';
+    close.className = 'btn btn-default btn-xs';
+    close.textContent = 'Schließen';
+    close.disabled = true;
+    close.addEventListener('click', () => {
+      if (running) return;
+      container.remove();
+      style.remove();
+    });
+    const statistics = document.createElement('div');
+    statistics.id = 'nilspe-vmp-statistics';
     const track = document.createElement('div');
     track.id = 'nilspe-vmp-track';
     const fill = document.createElement('div');
     fill.id = 'nilspe-vmp-fill';
     track.append(fill);
-    container.append(status, track);
+    row.append(stop, status, close);
+    container.append(row, statistics, track);
     document.body.append(container);
   }
 
@@ -534,11 +646,27 @@
     fill.style.width = total > 0 ? `${completed / total * 100}%` : '0%';
   }
 
-  function removeProgressBar(delay = 1_500) {
-    setTimeout(() => {
-      document.getElementById('nilspe-vmp-progress')?.remove();
-      document.getElementById('nilspe-vmp-style')?.remove();
-    }, delay);
+  function updateStatistics(changed, completed, errors, total) {
+    const statistics = document.getElementById('nilspe-vmp-statistics');
+    if (!statistics) return;
+    const format = number => Number(number).toLocaleString('de-DE');
+    statistics.replaceChildren();
+    for (const entry of [
+      `Geänderte Fahrzeuge: ${format(changed)}`,
+      `Fehler: ${format(errors)}`,
+      `Fahrzeuge: ${format(completed)}/${format(total)}`
+    ]) {
+      const span = document.createElement('span');
+      span.textContent = entry;
+      statistics.append(span);
+    }
+  }
+
+  function finishProgress() {
+    const stop = document.getElementById('nilspe-vmp-stop');
+    const close = document.getElementById('nilspe-vmp-close');
+    if (stop) stop.disabled = true;
+    if (close) close.disabled = false;
   }
 
   async function changeVehicleMaxPersonal(vehicleId, maxPersonal) {
@@ -599,20 +727,33 @@
   async function runForBuildings(buildings) {
     const delays = await configuredDelays();
     await loadVehicleTable();
+    if (cancelled) {
+      setProgress('Abgebrochen', 0, 0, 'warning');
+      return;
+    }
     const jobs = await buildJobs(buildings);
+    if (cancelled) {
+      setProgress('Abgebrochen', 0, jobs.length, 'warning');
+      updateStatistics(0, 0, 0, jobs.length);
+      return;
+    }
 
     if (jobs.length === 0) {
       setProgress('Keine Fahrzeug-Aenderung notwendig', 1, 1, 'success');
-      removeProgressBar();
+      updateStatistics(0, 0, 0, 0);
       return;
     }
 
     let completed = 0;
     let errors = 0;
+    let nextIndex = 0;
+    updateStatistics(0, 0, 0, jobs.length);
 
-    await runWithConcurrency(
-      jobs,
-      async job => {
+    async function worker() {
+      while (!cancelled) {
+        const index = nextIndex++;
+        if (index >= jobs.length) return;
+        const job = jobs[index];
         setProgress(
           `${completed}/${jobs.length}: Fahrzeug ${job.vehicleId} -> ${job.target}`,
           completed,
@@ -632,24 +773,29 @@
         }
 
         completed++;
+        updateStatistics(completed - errors, completed, errors, jobs.length);
         setProgress(
           `${completed}/${jobs.length} Fahrzeuge geaendert`,
           completed,
           jobs.length,
           errors ? 'warning' : 'success'
         );
-      },
-      { concurrency: 3, delay: delays.vehicle }
+        if (!cancelled) await sleep(delays.vehicle);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(3, jobs.length) }, worker)
     );
 
     setProgress(
-      `Fertig: ${completed - errors} Fahrzeuge geaendert, ${errors} Fehler`,
+      cancelled
+        ? `Abgebrochen: ${completed - errors} Fahrzeuge geändert, ${errors} Fehler`
+        : `Fertig: ${completed - errors} Fahrzeuge geändert, ${errors} Fehler`,
       completed,
       jobs.length,
-      errors ? 'warning' : 'success'
+      cancelled || errors ? 'warning' : 'success'
     );
-    await sleep(delays.building);
-    removeProgressBar(3_000);
+    if (!cancelled) await sleep(delays.building);
   }
 
   function settingsButton() {
@@ -674,9 +820,16 @@
   }
 
   async function runForCurrentPage(runButton, buildingType, buildingId) {
+    if (running) return;
+    running = true;
+    cancelled = false;
     runButton.disabled = true;
 
     try {
+      ensureProgressBar();
+      document.getElementById('nilspe-vmp-stop').disabled = false;
+      document.getElementById('nilspe-vmp-close').disabled = true;
+      updateStatistics(0, 0, 0, 0);
       setProgress('Lade Gebaeude und Fahrzeuge...');
       const buildings = await buildingsForCurrentPage(buildingType, buildingId);
 
@@ -697,7 +850,9 @@
       console.error('[Fahrzeug Max-Personal] Lauf fehlgeschlagen:', error);
       setProgress(`Fehler: ${error.message ?? error}`, 0, 0, 'danger');
     } finally {
+      running = false;
       runButton.disabled = false;
+      finishProgress();
     }
   }
 
@@ -753,3 +908,4 @@
   new MutationObserver(() => addVehicleTabButton(buildingType, buildingId))
     .observe(document.body, { childList: true, subtree: true });
 })();
+
