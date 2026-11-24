@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Extensions
 // @namespace    NilsPe.activate.extensions
-// @version      1.0.2
+// @version      1.1.0
 // @description  Aktiviert oder deaktiviert konfigurierte Erweiterungen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -11,6 +11,8 @@
 // @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Deactivate-Extensions.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
+// @match        https://leitstellenspiel.de/buildings/*
+// @match        https://leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
@@ -55,7 +57,8 @@
     [25, 'Bergrettung'],
     [26, 'Seenotrettungswache'],
     [27, 'Schule fuer Seefahrt und Seenotrettung'],
-    [28, 'Hubschrauberstation (Seenotrettung)']
+    [28, 'Hubschrauberstation (Seenotrettung)'],
+    [29, 'Autobahnpolizei']
   ].map(([id, name]) => ({ id, name }));
 
   function numberedOptions(name, ids) {
@@ -174,6 +177,7 @@
     new Promise(resolve => setTimeout(resolve, milliseconds));
 
   let running = false;
+  let cancelled = false;
 
   function parseStoredArray(value) {
     try {
@@ -292,67 +296,154 @@
   }
 
   async function createSettings() {
-    if (typeof addOptions !== 'function') {
+    if (typeof waitForSettingsDom !== 'function' ||
+        typeof createSettingsPane !== 'function') {
+      console.error('[De-/Activate Extensions] NilsPe-Skriptbasis fehlt.');
       return;
     }
+    if (!await waitForSettingsDom()) return;
 
-    const optionsByType = await extensionOptions();
-    const visibleBuildingTypes = BUILDING_TYPES.filter(
-      buildingType => optionsByType.get(buildingType.id)?.size
+    const { anchor, body } = createSettingsPane(
+      SETTINGS_IDENTIFIER, 'De-/Activate Extensions'
     );
-    const settings = [{ type: 'header', text: 'Erweiterungen aktivieren' }];
+    let rendered = false;
+    anchor.addEventListener('click', () => void renderSettings());
 
-    for (const buildingType of visibleBuildingTypes) {
-      settings.push({
-        type: 'select',
-        key: `${ACTIVATE_PREFIX}${buildingType.id}`,
-        label: `${buildingType.id} ${buildingType.name}`,
-        title: 'Zu aktivierende Erweiterungen',
-        multiple: true,
-        options: [...optionsByType.get(buildingType.id).values()]
-          .sort((a, b) => Number(a.value) - Number(b.value))
-      });
-    }
+    async function renderSettings() {
+      if (rendered) return;
+      rendered = true;
+      const optionsByType = await extensionOptions();
 
-    settings.push({ type: 'header', text: 'Erweiterungen deaktivieren' });
+      for (const [prefix, title] of [
+        [ACTIVATE_PREFIX, 'Erweiterungen aktivieren'],
+        [DEACTIVATE_PREFIX, 'Erweiterungen deaktivieren']
+      ]) {
+        const heading = document.createElement('h2');
+        heading.textContent = title;
+        body.append(heading);
 
-    for (const buildingType of visibleBuildingTypes) {
-      settings.push({
-        type: 'select',
-        key: `${DEACTIVATE_PREFIX}${buildingType.id}`,
-        label: `${buildingType.id} ${buildingType.name}`,
-        title: 'Zu deaktivierende Erweiterungen',
-        multiple: true,
-        options: [...optionsByType.get(buildingType.id).values()]
-          .sort((a, b) => Number(a.value) - Number(b.value))
-      });
-    }
+        for (const buildingType of BUILDING_TYPES) {
+          const options = [...(optionsByType.get(buildingType.id)?.values() ?? [])]
+            .sort((a, b) => Number(a.value) - Number(b.value));
+          if (!options.length) continue;
 
-    settings.push(
-      { type: 'header', text: 'Ablauf' },
-      {
-        type: 'number',
-        key: ACTION_DELAY_KEY,
-        label: 'Pause nach einer Umschaltung [ms]',
-        min: 0,
-        max: 5_000,
-        default: DEFAULT_ACTION_DELAY
-      },
-      {
-        type: 'number',
-        key: BUILDING_DELAY_KEY,
-        label: 'Pause nach einem Gebaeude [ms]',
-        min: 0,
-        max: 5_000,
-        default: DEFAULT_BUILDING_DELAY
+          const selected = new Set(await selectedIds(prefix, buildingType.id));
+          const panel = document.createElement('details');
+          panel.style.cssText = 'margin-bottom:7px;border:1px solid #8885;border-radius:4px';
+          const summary = document.createElement('summary');
+          summary.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:9px 12px;cursor:pointer;background:#8882';
+          const name = document.createElement('strong');
+          name.textContent = `${buildingType.id} – ${buildingType.name}`;
+          const count = document.createElement('span');
+          count.className = 'label label-default';
+          summary.append(name, count);
+          const content = document.createElement('div');
+          content.style.padding = '10px';
+          const toolbar = document.createElement('div');
+          toolbar.style.cssText = 'display:flex;gap:5px;margin-bottom:8px';
+          const list = document.createElement('div');
+          const key = `${prefix}${buildingType.id}`;
+          let saveQueue = Promise.resolve();
+
+          function save() {
+            const snapshot = [...selected];
+            saveQueue = saveQueue.catch(() => {}).then(() =>
+              GM.setValue(key, JSON.stringify(snapshot))
+            );
+            void saveQueue.catch(error =>
+              console.error('[De-/Activate Extensions] Speichern fehlgeschlagen:', error)
+            );
+          }
+
+          function update() {
+            count.textContent = `${selected.size} / ${options.length} ausgewählt`;
+            count.className = selected.size ? 'label label-success' : 'label label-default';
+            list.replaceChildren();
+            for (const option of options) {
+              const id = Number(option.value);
+              const active = selected.has(id);
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;border:1px solid;border-radius:3px';
+              row.style.background = active ? 'rgba(92, 184, 92, .10)' : '#8881';
+              row.style.borderColor = active ? 'rgba(92, 184, 92, .35)' : '#8885';
+              const label = document.createElement('span');
+              label.style.flex = '1';
+              label.style.cursor = 'pointer';
+              label.style.opacity = active ? '1' : '.6';
+              label.textContent = `${option.name} (${id})`;
+              const toggle = document.createElement('button');
+              toggle.type = 'button';
+              toggle.className = active ? 'btn btn-danger btn-xs' : 'btn btn-success btn-xs';
+              toggle.style.width = '30px';
+              toggle.textContent = active ? '✕' : '✓';
+              toggle.title = active ? 'Erweiterung abwählen' : 'Erweiterung auswählen';
+              function toggleSelection() {
+                if (selected.has(id)) selected.delete(id);
+                else selected.add(id);
+                update();
+                save();
+              }
+              label.addEventListener('click', toggleSelection);
+              toggle.addEventListener('click', toggleSelection);
+              row.append(label, toggle);
+              list.append(row);
+            }
+          }
+
+          for (const [text, active, color] of [
+            ['Alle auswählen', true, 'btn-success'],
+            ['Alle abwählen', false, 'btn-danger']
+          ]) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `btn btn-xs ${color}`;
+            button.style.width = '78px';
+            button.style.padding = '1px 2px';
+            button.textContent = text;
+            button.addEventListener('click', () => {
+              selected.clear();
+              if (active) for (const option of options) selected.add(Number(option.value));
+              update();
+              save();
+            });
+            toolbar.append(button);
+          }
+          update();
+          content.append(toolbar, list);
+          panel.append(summary, content);
+          body.append(panel);
+        }
       }
-    );
 
-    await addOptions({
-      identifier: SETTINGS_IDENTIFIER,
-      title: 'De-/Activate Extensions',
-      settings
-    });
+      const flow = document.createElement('h2');
+      flow.textContent = 'Ablauf';
+      body.append(flow);
+      for (const [key, label, fallback] of [
+        [ACTION_DELAY_KEY, 'Pause nach einer Umschaltung [ms]', DEFAULT_ACTION_DELAY],
+        [BUILDING_DELAY_KEY, 'Pause nach einem Gebäude [ms]', DEFAULT_BUILDING_DELAY]
+      ]) {
+        const field = document.createElement('label');
+        field.style.cssText = 'display:block;margin-bottom:10px';
+        field.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '5000';
+        input.className = 'form-control';
+        input.style.width = '130px';
+        input.value = await GM.getValue(key, fallback);
+        input.addEventListener('change', () => {
+          void GM.setValue(key, Math.min(5000, Math.max(0, Number(input.value) || 0)));
+        });
+        field.append(input);
+        body.append(field);
+      }
+    }
+
+    if (location.hash === `#${SETTINGS_IDENTIFIER}`) {
+      await renderSettings();
+      anchor.click();
+    }
   }
 
   function csrfToken() {
@@ -424,83 +515,87 @@
     const style = document.createElement('style');
     style.id = 'nilspe-ae-style';
     style.textContent = `
-      #nilspe-ae-progress {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 2147483000;
-        padding: 7px 12px;
-        border-top: 1px solid #ddd;
-        background: #f8f8f8;
-      }
-      #nilspe-ae-track {
-        display: flex;
-        height: 12px;
-        margin-top: 5px;
-        overflow: hidden;
-        border-radius: 4px;
-        background: #ddd;
-      }
-      #nilspe-ae-success {
-        height: 100%;
-        width: 0;
-        background: #5cb85c;
-      }
-      #nilspe-ae-errors {
-        height: 100%;
-        width: 0;
-        background: #d9534f;
-      }
+      #nilspe-ae-progress {position:fixed;left:0;right:0;bottom:0;z-index:2147483000;padding:9px 12px;border-top:1px solid #888;background:#333;color:#fff}
+      #nilspe-ae-progress-row {display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+      #nilspe-ae-statistics {display:flex;flex-wrap:wrap;gap:20px;margin-top:6px;font-size:12px}
+      #nilspe-ae-track {height:12px;margin-top:6px;overflow:hidden;border-radius:4px;background:#777}
+      #nilspe-ae-fill {height:100%;width:0;background:#5cb85c;transition:width .15s}
     `;
     document.head.append(style);
 
     const container = document.createElement('div');
     container.id = 'nilspe-ae-progress';
     const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.gap = '12px';
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.className = 'btn btn-default btn-xs';
-    cancel.textContent = 'Abbrechen';
-    cancel.addEventListener('click', () => {
-      running = false;
-      setProgress('Abgebrochen', 0, 0, 0, 'danger');
+    row.id = 'nilspe-ae-progress-row';
+    const stop = document.createElement('button');
+    stop.id = 'nilspe-ae-stop';
+    stop.type = 'button';
+    stop.className = 'btn btn-danger btn-xs';
+    stop.textContent = 'Abbrechen';
+    stop.addEventListener('click', () => {
+      cancelled = true;
+      stop.disabled = true;
+      document.getElementById('nilspe-ae-status').textContent =
+        'Abbruch – laufende Anfrage wird beendet...';
     });
     const status = document.createElement('span');
     status.id = 'nilspe-ae-status';
     status.className = 'label label-info';
     status.textContent = 'Bereit';
+    const close = document.createElement('button');
+    close.id = 'nilspe-ae-close';
+    close.type = 'button';
+    close.className = 'btn btn-default btn-xs';
+    close.textContent = 'Schließen';
+    close.disabled = true;
+    close.addEventListener('click', () => {
+      if (running) return;
+      container.remove();
+      style.remove();
+    });
+    row.append(stop, status, close);
+    const statistics = document.createElement('div');
+    statistics.id = 'nilspe-ae-statistics';
     const track = document.createElement('div');
     track.id = 'nilspe-ae-track';
-    const success = document.createElement('div');
-    success.id = 'nilspe-ae-success';
-    const errors = document.createElement('div');
-    errors.id = 'nilspe-ae-errors';
-    track.append(success, errors);
-    row.append(cancel, status);
-    container.append(row, track);
+    const fill = document.createElement('div');
+    fill.id = 'nilspe-ae-fill';
+    track.append(fill);
+    container.append(row, statistics, track);
     document.body.append(container);
   }
 
-  function setProgress(
-    message,
-    completed = 0,
-    errors = 0,
-    total = 0,
-    type = 'info'
-  ) {
+  function setProgress(message, completed = 0, errors = 0, total = 0, type = 'info') {
     ensureProgress();
     const status = document.getElementById('nilspe-ae-status');
-    const successBar = document.getElementById('nilspe-ae-success');
-    const errorBar = document.getElementById('nilspe-ae-errors');
-    const safeTotal = Math.max(total, 1);
+    const fill = document.getElementById('nilspe-ae-fill');
     status.className = `label label-${type}`;
     status.textContent = message;
-    successBar.style.width = `${(completed - errors) / safeTotal * 100}%`;
-    errorBar.style.width = `${errors / safeTotal * 100}%`;
+    fill.style.width = total > 0
+      ? `${Math.min(100, completed / total * 100)}%` : '0%';
+  }
+
+  function updateStatistics(changed, completed, errors, total) {
+    const statistics = document.getElementById('nilspe-ae-statistics');
+    if (!statistics) return;
+    const format = number => Number(number).toLocaleString('de-DE');
+    statistics.replaceChildren();
+    for (const entry of [
+      `Umgeschaltete Erweiterungen: ${format(changed)}`,
+      `Fehler: ${format(errors)}`,
+      `Gebäude: ${format(completed)}/${format(total)}`
+    ]) {
+      const span = document.createElement('span');
+      span.textContent = entry;
+      statistics.append(span);
+    }
+  }
+
+  function finishProgress() {
+    const stop = document.getElementById('nilspe-ae-stop');
+    const close = document.getElementById('nilspe-ae-close');
+    if (stop) stop.disabled = true;
+    if (close) close.disabled = false;
   }
 
   async function configurationFor(
@@ -537,7 +632,7 @@
     let changed = 0;
 
     for (const extension of extensions) {
-      if (!running) {
+      if (cancelled) {
         break;
       }
 
@@ -566,7 +661,11 @@
     }
 
     running = true;
+    cancelled = false;
     button.disabled = true;
+    ensureProgress();
+    document.getElementById('nilspe-ae-stop').disabled = false;
+    document.getElementById('nilspe-ae-close').disabled = true;
 
     try {
       const dispatchCenterId = Number(
@@ -612,16 +711,19 @@
 
       if (relevant.length === 0) {
         setProgress('Keine Umschaltung erforderlich', 0, 0, 0, 'success');
+        updateStatistics(0, 0, 0, 0);
         return;
       }
 
       let completed = 0;
       let errors = 0;
       let changed = 0;
+      updateStatistics(0, 0, 0, relevant.length);
 
       await runWithConcurrency(
         relevant,
         async ({ building, extensions }) => {
+          if (cancelled) return;
           setProgress(
             `${completed}/${relevant.length}: ${building.caption}`,
             completed,
@@ -647,6 +749,7 @@
           }
 
           completed++;
+          updateStatistics(changed, completed, errors, relevant.length);
           setProgress(
             `${completed}/${relevant.length} Gebaeude, ${changed} umgeschaltet`,
             completed,
@@ -658,11 +761,12 @@
         {
           concurrency: 3,
           delay: buildingDelay,
-          shouldContinue: () => running
+          shouldContinue: () => !cancelled
         }
       );
 
-      if (!running) {
+      if (cancelled) {
+        setProgress('Abgebrochen', completed, errors, relevant.length, 'warning');
         return;
       }
 
@@ -679,6 +783,7 @@
     } finally {
       running = false;
       button.disabled = false;
+      finishProgress();
     }
   }
 
@@ -743,3 +848,4 @@
     });
   }
 })();
+
