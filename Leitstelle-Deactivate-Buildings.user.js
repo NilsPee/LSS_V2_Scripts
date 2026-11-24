@@ -1,8 +1,9 @@
+
 // ==UserScript==
 // @name         Leitstelle De-/Activate Buildings
 // @namespace    NilsPe.activate.buildings
-// @version      1.1.3
-// @description  Aktiviert oder deaktiviert konfigurierte Gebaeude einer Leitstelle
+// @version      1.2.0
+// @description  Aktiviert oder deaktiviert konfigurierte Gebäude einer Leitstelle
 // @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
@@ -24,7 +25,10 @@
 (async function () {
   'use strict';
 
+  const VERSION = '1.2.0';
+  const PREFIX = '[De-/Activate Buildings]';
   const SETTINGS_IDENTIFIER = 'nilspe_activate_buildings';
+
   const KEYS = {
     activateTypes: 'nilspe_ab_activate_types',
     deactivateTypes: 'nilspe_ab_deactivate_types',
@@ -53,22 +57,42 @@
     [25, 'Bergrettung'],
     [26, 'Seenotrettungswache'],
     [28, 'Hubschrauberstation (Seenotrettung)']
-  ].map(([value, name]) => ({ value, name: `${value} ${name}` }));
+  ].map(([value, name]) => ({
+    value,
+    name: `${value} ${name}`
+  }));
 
-  const DEFAULT_TYPES = [
-    0, 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 24, 25,
-    26, 28
-  ];
-
-  const sleep = milliseconds =>
-    new Promise(resolve => setTimeout(resolve, milliseconds));
+  const DEFAULT_TYPES = BUILDING_TYPES.map(
+    type => type.value
+  );
 
   let running = false;
   let cancelled = false;
+  let buttons = [];
+
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
+
+  function el(tag, className = '', text = '') {
+    const element = document.createElement(tag);
+
+    if (className) {
+      element.className = className;
+    }
+
+    if (text) {
+      element.textContent = text;
+    }
+
+    return element;
+  }
 
   function parseArray(value, fallback = []) {
     try {
-      const parsed = JSON.parse(value);
+      const parsed = typeof value === 'string'
+        ? JSON.parse(value)
+        : value;
+
       return Array.isArray(parsed)
         ? parsed.map(Number).filter(Number.isInteger)
         : fallback;
@@ -77,141 +101,561 @@
     }
   }
 
+  function format(number) {
+    return Number(number).toLocaleString('de-DE');
+  }
+
+  function safeNumber(raw, fallback, min, max) {
+    const value = Number(raw);
+
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.max(
+      min,
+      Math.min(max, Math.floor(value))
+    );
+  }
+
+  /*
+   * ==========================================
+   * SPEICHER / EINSTELLUNGEN
+   * ==========================================
+   */
+
   async function initializeDefaults() {
-    for (const key of [KEYS.activateTypes, KEYS.deactivateTypes]) {
+    for (const key of [
+      KEYS.activateTypes,
+      KEYS.deactivateTypes
+    ]) {
       const stored = await GM.getValue(key, null);
 
       if (stored === null) {
-        await GM.setValue(key, JSON.stringify(DEFAULT_TYPES));
+        await GM.setValue(
+          key,
+          JSON.stringify(DEFAULT_TYPES)
+        );
       }
     }
   }
 
-  async function createSettings() {
-    if (typeof waitForSettingsDom !== 'function' ||
-        typeof createSettingsPane !== 'function') {
-      console.error('[De-/Activate Buildings] NilsPe-Skriptbasis fehlt.');
+  function injectSettingsStyles() {
+    if (
+      document.getElementById(
+        'nilspe-ab-settings-style'
+      )
+    ) {
       return;
     }
-    if (!await waitForSettingsDom()) return;
+
+    const style = el('style');
+    style.id = 'nilspe-ab-settings-style';
+
+    style.textContent = `
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-group {
+        margin-bottom: 7px;
+        border: 1px solid #8885;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-group > summary {
+        padding: 9px 12px;
+        cursor: pointer;
+        background: #8882;
+        font-weight: bold;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-group-content {
+        padding: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-help {
+        margin-bottom: 10px;
+        font-size: 12px;
+        opacity: .85;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 9px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-bulk {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        width: 110px;
+        height: 28px;
+        padding: 2px 6px !important;
+        margin: 0 !important;
+        font-size: 13px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-count {
+        margin-left: 4px;
+        font-size: 12px;
+        opacity: .75;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-option {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        box-sizing: border-box;
+        padding: 7px 9px;
+        margin-bottom: 4px;
+        background: #8881;
+        border: 1px solid #8885;
+        border-radius: 3px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-option.active {
+        background: rgba(92,184,92,.10);
+        border-color: rgba(92,184,92,.35);
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-option-label {
+        flex: 1;
+        margin: 0;
+        cursor: pointer;
+        font-weight: normal;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-option:not(.active)
+      .nilspe-ab-option-label {
+        opacity: .7;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-toggle {
+        width: 30px;
+        min-width: 30px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-number {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 4px;
+        padding: 7px 9px;
+        border: 1px solid rgba(92,184,92,.35);
+        background: rgba(92,184,92,.10);
+        border-radius: 3px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-number input {
+        flex: 0 0 84px;
+        width: 84px !important;
+        height: 28px !important;
+        padding: 3px 7px !important;
+        box-sizing: border-box;
+        text-align: left;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-number label {
+        flex: 1;
+        margin: 0;
+        font-weight: normal;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-save-state {
+        font-size: 12px;
+        opacity: .75;
+      }
+    `;
+
+    document.head.append(style);
+  }
+
+  function makeGroup(title, description) {
+    const details = el(
+      'details',
+      'nilspe-ab-group'
+    );
+
+    const summary = el('summary', '', title);
+
+    const content = el(
+      'div',
+      'nilspe-ab-group-content'
+    );
+
+    if (description) {
+      content.append(
+        el('p', 'nilspe-ab-help', description)
+      );
+    }
+
+    details.append(summary, content);
+
+    return { details, summary, content };
+  }
+
+  /*
+   * ==========================================
+   * GEBÄUDETYPEN-AUSWAHL
+   * ==========================================
+   */
+
+  async function createTypeSelection(
+    content,
+    key,
+    defaultTypes = DEFAULT_TYPES
+  ) {
+    const selected = new Set(
+      parseArray(
+        await GM.getValue(
+          key,
+          JSON.stringify(defaultTypes)
+        ),
+        defaultTypes
+      )
+    );
+
+    const toolbar = el(
+      'div',
+      'nilspe-ab-toolbar'
+    );
+
+    const allButton = el(
+      'button',
+      'btn btn-default btn-xs nilspe-ab-bulk',
+      'Alle anwählen'
+    );
+
+    const noneButton = el(
+      'button',
+      'btn btn-default btn-xs nilspe-ab-bulk',
+      'Alle abwählen'
+    );
+
+    allButton.type = 'button';
+    noneButton.type = 'button';
+
+    const count = el(
+      'span',
+      'nilspe-ab-count'
+    );
+
+    const saveState = el(
+      'span',
+      'nilspe-ab-save-state'
+    );
+
+    const list = el('div');
+
+    let saveQueue = Promise.resolve();
+
+    function save() {
+      const snapshot = [...selected].sort(
+        (a, b) => a - b
+      );
+
+      saveState.textContent = 'Speichere ...';
+
+      saveQueue = saveQueue
+        .catch(() => {})
+        .then(() =>
+          GM.setValue(
+            key,
+            JSON.stringify(snapshot)
+          )
+        )
+        .then(() => {
+          saveState.textContent = 'Gespeichert';
+        })
+        .catch(error => {
+          saveState.textContent =
+            'Speichern fehlgeschlagen';
+
+          console.error(
+            PREFIX,
+            'Einstellung speichern fehlgeschlagen:',
+            key,
+            error
+          );
+        });
+    }
+
+    function update() {
+      count.textContent =
+        `${selected.size} von ${BUILDING_TYPES.length} ausgewählt`;
+
+      list.replaceChildren();
+
+      for (const option of BUILDING_TYPES) {
+        const active = selected.has(option.value);
+
+        const row = el(
+          'div',
+          'nilspe-ab-option'
+        );
+
+        row.classList.toggle('active', active);
+
+        const label = el(
+          'span',
+          'nilspe-ab-option-label',
+          option.name
+        );
+
+        const toggle = el(
+          'button',
+          'btn btn-xs nilspe-ab-toggle ' +
+          (active ? 'btn-danger' : 'btn-success'),
+          active ? '✕' : '✓'
+        );
+
+        toggle.type = 'button';
+        toggle.title = active
+          ? 'Gebäudetyp abwählen'
+          : 'Gebäudetyp auswählen';
+
+        function toggleSelection() {
+          if (selected.has(option.value)) {
+            selected.delete(option.value);
+          } else {
+            selected.add(option.value);
+          }
+
+          update();
+          save();
+        }
+
+        label.addEventListener(
+          'click',
+          toggleSelection
+        );
+
+        toggle.addEventListener(
+          'click',
+          toggleSelection
+        );
+
+        row.append(label, toggle);
+        list.append(row);
+      }
+    }
+
+    allButton.addEventListener('click', () => {
+      selected.clear();
+
+      for (const option of BUILDING_TYPES) {
+        selected.add(option.value);
+      }
+
+      update();
+      save();
+    });
+
+    noneButton.addEventListener('click', () => {
+      selected.clear();
+      update();
+      save();
+    });
+
+    toolbar.append(
+      allButton,
+      noneButton,
+      count,
+      saveState
+    );
+
+    content.append(toolbar, list);
+
+    update();
+  }
+
+  /*
+   * ==========================================
+   * ZAHLENFELDER
+   * ==========================================
+   */
+
+  async function createNumberSetting(
+    content,
+    { key, label, fallback, min, max }
+  ) {
+    const row = el(
+      'div',
+      'nilspe-ab-number'
+    );
+
+    const input = el(
+      'input',
+      'form-control input-sm'
+    );
+
+    input.type = 'number';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = '1';
+
+    input.value = String(
+      safeNumber(
+        await GM.getValue(key, fallback),
+        fallback,
+        min,
+        max
+      )
+    );
+
+    const caption = el('label', '', label);
+
+    const status = el(
+      'span',
+      'nilspe-ab-save-state'
+    );
+
+    row.append(input, caption, status);
+
+    input.addEventListener('change', () => {
+      const value = safeNumber(
+        input.value,
+        fallback,
+        min,
+        max
+      );
+
+      input.value = String(value);
+      status.textContent = 'Speichere ...';
+
+      void GM.setValue(key, value)
+        .then(() => {
+          status.textContent = 'Gespeichert';
+        })
+        .catch(error => {
+          status.textContent =
+            'Speichern fehlgeschlagen';
+          console.error(PREFIX, error);
+        });
+    });
+
+    content.append(row);
+  }
+
+  /*
+   * ==========================================
+   * EINSTELLUNGSSEITE
+   * ==========================================
+   */
+
+  async function createSettings() {
+    if (
+      typeof waitForSettingsDom !== 'function' ||
+      typeof createSettingsPane !== 'function'
+    ) {
+      console.error(
+        PREFIX,
+        'NilsPe-Skriptbasis fehlt.'
+      );
+      return;
+    }
+
+    if (!await waitForSettingsDom()) {
+      return;
+    }
+
     await initializeDefaults();
 
     const { anchor, body } = createSettingsPane(
-      SETTINGS_IDENTIFIER, 'De-/Activate Buildings'
+      SETTINGS_IDENTIFIER,
+      'De-/Activate Buildings'
     );
+
+    injectSettingsStyles();
+
     let rendered = false;
-    anchor.addEventListener('click', () => void renderSettings());
+    let rendering = false;
 
     async function renderSettings() {
-      if (rendered) return;
-      rendered = true;
-      for (const [key, title] of [
-        [KEYS.activateTypes, 'Gebäude aktivieren'],
-        [KEYS.deactivateTypes, 'Gebäude deaktivieren']
-      ]) {
-        const heading = document.createElement('h2');
-        heading.textContent = title;
-        body.append(heading);
-        const selected = new Set(parseArray(
-          await GM.getValue(key, JSON.stringify(DEFAULT_TYPES)), DEFAULT_TYPES
-        ));
-        const toolbar = document.createElement('div');
-        toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px';
-        const list = document.createElement('div');
-        let saveQueue = Promise.resolve();
+      if (rendered || rendering) return;
 
-        function save() {
-          const snapshot = [...selected];
-          saveQueue = saveQueue.catch(() => {}).then(() =>
-            GM.setValue(key, JSON.stringify(snapshot))
-          );
-          void saveQueue.catch(error =>
-            console.error('[De-/Activate Buildings] Speichern fehlgeschlagen:', error)
-          );
-        }
+      rendering = true;
 
-        function update() {
-          list.replaceChildren();
-          for (const option of BUILDING_TYPES) {
-            const active = selected.has(option.value);
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;border:1px solid;border-radius:3px';
-            row.style.background = active ? 'rgba(92, 184, 92, .10)' : '#8881';
-            row.style.borderColor = active ? 'rgba(92, 184, 92, .35)' : '#8885';
-            const label = document.createElement('span');
-            label.style.flex = '1';
-            label.style.cursor = 'pointer';
-            label.style.opacity = active ? '1' : '.6';
-            label.textContent = option.name;
-            const toggle = document.createElement('button');
-            toggle.type = 'button';
-            toggle.className = active ? 'btn btn-danger btn-xs' : 'btn btn-success btn-xs';
-            toggle.style.width = '30px';
-            toggle.textContent = active ? '✕' : '✓';
-            toggle.title = active ? 'Gebäudetyp abwählen' : 'Gebäudetyp auswählen';
-            function toggleSelection() {
-              if (active) selected.delete(option.value);
-              else selected.add(option.value);
-              update();
-              save();
-            }
-            label.addEventListener('click', toggleSelection);
-            toggle.addEventListener('click', toggleSelection);
-            row.append(label, toggle);
-            list.append(row);
-          }
-        }
+      try {
+        const activate = makeGroup(
+          'Gebäude aktivieren',
+          'Gebäudetypen auswählen, die aktiviert werden sollen.'
+        );
 
-        for (const [text, active, color] of [
-          ['Alle auswählen', true, 'btn-success'],
-          ['Alle abwählen', false, 'btn-danger']
-        ]) {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.className = `btn btn-xs ${color}`;
-          button.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 110px;width:110px;height:28px;margin:0;padding:2px 6px;vertical-align:middle;white-space:nowrap;font-size:13px;line-height:1';
-          button.title = active ? 'Alle Gebäudetypen auswählen' : 'Alle Gebäudetypen abwählen';
-          button.textContent = text;
-          button.addEventListener('click', () => {
-            selected.clear();
-            if (active) for (const option of BUILDING_TYPES) selected.add(option.value);
-            update();
-            save();
-          });
-          toolbar.append(button);
-        }
-        update();
-        body.append(toolbar, list);
-      }
+        const deactivate = makeGroup(
+          'Gebäude deaktivieren',
+          'Gebäudetypen auswählen, die deaktiviert werden sollen.'
+        );
 
-      const flow = document.createElement('h2');
-      flow.textContent = 'Ablauf';
-      body.append(flow);
-      for (const [key, label, fallback, min, max] of [
-        [KEYS.concurrency, 'Parallele Gebäudeprüfungen', 3, 1, 10],
-        [KEYS.requestDelay, 'Pause nach einer Umschaltung [ms]', 100, 0, 5000]
-      ]) {
-        const field = document.createElement('label');
-        field.style.cssText = 'display:block;margin:8px 0;font-weight:normal';
-        const caption = document.createElement('strong');
-        caption.textContent = label;
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.className = 'form-control input-sm';
-        input.style.width = '110px';
-        input.min = String(min);
-        input.max = String(max);
-        input.value = String(await GM.getValue(key, fallback));
-        input.addEventListener('change', () => {
-          const value = Math.max(min, Math.min(max, Number(input.value) || fallback));
-          input.value = String(value);
-          void GM.setValue(key, value);
+        const flow = makeGroup(
+          'Ablauf',
+          'Gemeinsame Geschwindigkeitseinstellungen.'
+        );
+
+        await createTypeSelection(
+          activate.content,
+          KEYS.activateTypes
+        );
+
+        await createTypeSelection(
+          deactivate.content,
+          KEYS.deactivateTypes
+        );
+
+        await createNumberSetting(flow.content, {
+          key: KEYS.concurrency,
+          label: 'Parallele Gebäudeprüfungen',
+          fallback: 3,
+          min: 1,
+          max: 10
         });
-        field.append(caption, input);
-        body.append(field);
+
+        await createNumberSetting(flow.content, {
+          key: KEYS.requestDelay,
+          label: 'Pause nach einer Umschaltung [ms]',
+          fallback: 100,
+          min: 0,
+          max: 5000
+        });
+
+        body.replaceChildren(
+          activate.details,
+          deactivate.details,
+          flow.details
+        );
+
+        rendered = true;
+      } catch (error) {
+        console.error(
+          PREFIX,
+          'Einstellungen konnten nicht erstellt werden:',
+          error
+        );
+      } finally {
+        rendering = false;
       }
     }
+
+    anchor.addEventListener(
+      'click',
+      () => void renderSettings()
+    );
+
+    if (
+      location.hash === `#${SETTINGS_IDENTIFIER}`
+    ) {
+      await renderSettings();
+      anchor.click();
+    }
   }
+
+  /*
+   * ==========================================
+   * GEBÄUDE LADEN
+   * ==========================================
+   */
 
   function normalizeBuilding(building) {
     const dispatchCenterId =
@@ -225,83 +669,140 @@
       id: Number(building.id),
       building_type: Number(building.building_type),
       leitstelle_building_id:
-        dispatchCenterId == null ? null : Number(dispatchCenterId),
-      caption: building.caption || building.name || `Gebaeude ${building.id}`,
+        dispatchCenterId == null
+          ? null
+          : Number(dispatchCenterId),
+      caption:
+        building.caption ||
+        building.name ||
+        `Gebäude ${building.id}`,
       enabled: building.enabled !== false
     };
   }
 
-  async function loadBuildings(dispatchCenterId, types, desiredState) {
-    if (typeof openDb !== 'function' || typeof updateBuildings !== 'function') {
-      throw new Error('NilsPe-Skriptbasis wurde nicht geladen.');
+  async function loadBuildings(
+    dispatchCenterId,
+    types,
+    desiredState
+  ) {
+    if (
+      typeof openDb !== 'function' ||
+      typeof updateBuildings !== 'function' ||
+      typeof getDataByIndex !== 'function'
+    ) {
+      throw new Error(
+        'NilsPe-Skriptbasis wurde nicht geladen.'
+      );
     }
 
     const db = await openDb();
 
     try {
       await updateBuildings(db, 60);
-      return (await getDataByIndex(
-        db,
-        'buildings',
-        'leitstelle_building_id',
-        Number(dispatchCenterId)
-      ))
+
+      return (
+        await getDataByIndex(
+          db,
+          'buildings',
+          'leitstelle_building_id',
+          Number(dispatchCenterId)
+        )
+      )
         .map(normalizeBuilding)
-        .filter(building => types.has(building.building_type))
-        .filter(building => building.enabled !== desiredState)
+        .filter(building =>
+          types.has(building.building_type)
+        )
+        .filter(building =>
+          building.enabled !== desiredState
+        )
         .sort((a, b) => a.id - b.id);
     } finally {
       db.close();
     }
   }
 
+  /*
+   * ==========================================
+   * UMSCHALT-URL
+   * ==========================================
+   */
+
   async function toggleUrl(buildingId) {
-    const response = await fetch(`/buildings/${buildingId}`, {
-      credentials: 'same-origin',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    });
+    const response = await fetch(
+      `/buildings/${buildingId}`,
+      {
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Gebaeudeseite HTTP ${response.status}`);
+      throw new Error(
+        `Gebäudeseite HTTP ${response.status}`
+      );
     }
 
-    const documentFromResponse = new DOMParser().parseFromString(
+    const parsed = new DOMParser().parseFromString(
       await response.text(),
       'text/html'
     );
-    const link = documentFromResponse.querySelector(
+
+    const link = parsed.querySelector(
       `a[href*="/buildings/${buildingId}/active"], ` +
-      'a[href$="/active"][data-method], a.btn[href$="/active"]'
+      'a[href$="/active"][data-method], ' +
+      'a.btn[href$="/active"]'
     );
+
     const href = link?.getAttribute('href');
 
     if (!href) {
-      throw new Error('Umschalt-URL wurde nicht gefunden.');
+      throw new Error(
+        'Umschalt-URL wurde nicht gefunden.'
+      );
     }
 
     return new URL(href, location.origin).href;
   }
 
   async function toggleBuilding(buildingId) {
-    const response = await fetch(await toggleUrl(buildingId), {
+    const url = await toggleUrl(buildingId);
+
+    const response = await fetch(url, {
       method: 'GET',
       credentials: 'same-origin',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest'
+      },
       redirect: 'follow'
     });
 
     if (!response.ok) {
-      throw new Error(`Umschaltung HTTP ${response.status}`);
+      throw new Error(
+        `Umschaltung HTTP ${response.status}`
+      );
     }
   }
 
+  /*
+   * ==========================================
+   * FORTSCHRITTSANZEIGE
+   * ==========================================
+   */
+
   function ensureProgress() {
-    if (document.getElementById('nilspe-ab-progress')) {
+    if (
+      document.getElementById(
+        'nilspe-ab-progress'
+      )
+    ) {
       return;
     }
 
-    const style = document.createElement('style');
+    const style = el('style');
     style.id = 'nilspe-ab-style';
+
     style.textContent = `
       #nilspe-ab-progress {
         position: fixed;
@@ -314,72 +815,123 @@
         background: #333;
         color: #fff;
       }
-      #nilspe-ab-statistics {display:flex;flex-wrap:wrap;gap:20px;margin-top:6px;font-size:12px}
+
+      #nilspe-ab-progress-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      #nilspe-ab-statistics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        margin-top: 6px;
+        font-size: 12px;
+      }
+
       #nilspe-ab-track {
         display: flex;
         height: 12px;
-        margin-top: 5px;
+        margin-top: 6px;
         overflow: hidden;
         border-radius: 4px;
         background: #777;
       }
+
       #nilspe-ab-success {
         width: 0;
         height: 100%;
         background: #5cb85c;
       }
+
       #nilspe-ab-errors {
         width: 0;
         height: 100%;
         background: #d9534f;
       }
     `;
+
     document.head.append(style);
 
-    const container = document.createElement('div');
-    container.id = 'nilspe-ab-progress';
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.gap = '12px';
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.id = 'nilspe-ab-stop';
-    cancel.className = 'btn btn-danger btn-xs';
-    cancel.textContent = 'Abbrechen';
-    cancel.addEventListener('click', () => {
+    const progress = el('div');
+    progress.id = 'nilspe-ab-progress';
+
+    const top = el('div');
+    top.id = 'nilspe-ab-progress-row';
+
+    const stop = el(
+      'button',
+      'btn btn-danger btn-xs',
+      'Abbrechen'
+    );
+
+    stop.type = 'button';
+    stop.id = 'nilspe-ab-stop';
+
+    stop.addEventListener('click', () => {
+      if (!running) return;
+
       cancelled = true;
-      cancel.disabled = true;
-      document.getElementById('nilspe-ab-status').textContent =
-        'Abbruch – laufende Anfragen werden beendet...';
+      stop.disabled = true;
+
+      const status = document.getElementById(
+        'nilspe-ab-status'
+      );
+
+      if (status) {
+        status.textContent =
+          'Abbruch – laufende Anfragen werden beendet ...';
+      }
     });
-    const status = document.createElement('span');
+
+    const status = el(
+      'span',
+      'label label-info',
+      'Bereit'
+    );
+
     status.id = 'nilspe-ab-status';
-    status.className = 'label label-info';
-    status.textContent = 'Bereit';
-    const track = document.createElement('div');
-    track.id = 'nilspe-ab-track';
-    const success = document.createElement('div');
-    success.id = 'nilspe-ab-success';
-    const errors = document.createElement('div');
-    errors.id = 'nilspe-ab-errors';
-    const close = document.createElement('button');
-    close.id = 'nilspe-ab-close';
+
+    const close = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Schließen'
+    );
+
     close.type = 'button';
-    close.className = 'btn btn-default btn-xs';
-    close.textContent = 'Schließen';
+    close.id = 'nilspe-ab-close';
     close.disabled = true;
+
     close.addEventListener('click', () => {
       if (running) return;
-      container.remove();
-      style.remove();
+
+      progress.remove();
     });
-    const statistics = document.createElement('div');
+
+    const statistics = el('div');
     statistics.id = 'nilspe-ab-statistics';
+
+    const track = el('div');
+    track.id = 'nilspe-ab-track';
+
+    const success = el('div');
+    success.id = 'nilspe-ab-success';
+
+    const errors = el('div');
+    errors.id = 'nilspe-ab-errors';
+
     track.append(success, errors);
-    row.append(cancel, status, close);
-    container.append(row, statistics, track);
-    document.body.append(container);
+    top.append(stop, status, close);
+
+    progress.append(
+      top,
+      statistics,
+      track
+    );
+
+    document.body.append(progress);
   }
 
   function setProgress(
@@ -390,105 +942,189 @@
     type = 'info'
   ) {
     ensureProgress();
-    const status = document.getElementById('nilspe-ab-status');
-    const successBar = document.getElementById('nilspe-ab-success');
-    const errorBar = document.getElementById('nilspe-ab-errors');
+
+    const status = document.getElementById(
+      'nilspe-ab-status'
+    );
+
+    const success = document.getElementById(
+      'nilspe-ab-success'
+    );
+
+    const errorBar = document.getElementById(
+      'nilspe-ab-errors'
+    );
+
     const safeTotal = Math.max(total, 1);
+
     status.className = `label label-${type}`;
     status.textContent = message;
-    successBar.style.width = `${Math.max(0, (completed - errors) / safeTotal * 100)}%`;
-    errorBar.style.width = `${Math.max(0, errors / safeTotal * 100)}%`;
+
+    success.style.width =
+      `${Math.max(0, completed - errors) /
+        safeTotal * 100}%`;
+
+    errorBar.style.width =
+      `${errors / safeTotal * 100}%`;
   }
 
-  function updateStatistics(changed, completed, errors, total) {
-    const statistics = document.getElementById('nilspe-ab-statistics');
+  function updateStatistics(
+    changed,
+    completed,
+    errors,
+    total
+  ) {
+    const statistics = document.getElementById(
+      'nilspe-ab-statistics'
+    );
+
     if (!statistics) return;
-    const format = number => Number(number).toLocaleString('de-DE');
+
     statistics.replaceChildren();
-    for (const entry of [
+
+    for (const item of [
       `Umgeschaltete Gebäude: ${format(changed)}`,
       `Fehler: ${format(errors)}`,
       `Gebäude: ${format(completed)}/${format(total)}`
     ]) {
-      const span = document.createElement('span');
-      span.textContent = entry;
-      statistics.append(span);
+      statistics.append(el('span', '', item));
     }
   }
 
   function finishProgress() {
-    const stop = document.getElementById('nilspe-ab-stop');
-    const close = document.getElementById('nilspe-ab-close');
+    const stop = document.getElementById(
+      'nilspe-ab-stop'
+    );
+
+    const close = document.getElementById(
+      'nilspe-ab-close'
+    );
+
     if (stop) stop.disabled = true;
     if (close) close.disabled = false;
   }
 
-  async function run(desiredState, button) {
-    if (running) {
-      return;
-    }
+  /*
+   * ==========================================
+   * HAUPTABLAUF
+   * ==========================================
+   */
+
+  async function run(desiredState) {
+    if (running) return;
 
     running = true;
     cancelled = false;
-    button.disabled = true;
+
+    for (const button of buttons) {
+      button.disabled = true;
+    }
+
     ensureProgress();
-    document.getElementById('nilspe-ab-stop').disabled = false;
-    document.getElementById('nilspe-ab-close').disabled = true;
+
+    const stop = document.getElementById(
+      'nilspe-ab-stop'
+    );
+
+    const close = document.getElementById(
+      'nilspe-ab-close'
+    );
+
+    stop.disabled = false;
+    close.disabled = true;
+
+    let completed = 0;
+    let errors = 0;
+    let changed = 0;
+    let total = 0;
+
     updateStatistics(0, 0, 0, 0);
 
     try {
       const dispatchCenterId = Number(
-        location.pathname.match(/^\/buildings\/(\d+)/)?.[1]
+        location.pathname.match(
+          /^\/buildings\/(\d+)/
+        )?.[1]
       );
+
+      if (
+        !Number.isSafeInteger(dispatchCenterId) ||
+        dispatchCenterId <= 0
+      ) {
+        throw new Error(
+          'Ungültige Leitstellen-ID.'
+        );
+      }
+
       const typeKey = desiredState
         ? KEYS.activateTypes
         : KEYS.deactivateTypes;
-      const types = new Set(parseArray(
-        await GM.getValue(typeKey, JSON.stringify(DEFAULT_TYPES)),
-        DEFAULT_TYPES
-      ));
-      const concurrency = Math.max(
-        1,
-        Math.min(10, Number(await GM.getValue(KEYS.concurrency, 3)) || 3)
-      );
-      const requestDelay = Math.max(
-        0,
-        Number(await GM.getValue(KEYS.requestDelay, 100)) || 0
+
+      const types = new Set(
+        parseArray(
+          await GM.getValue(
+            typeKey,
+            JSON.stringify(DEFAULT_TYPES)
+          ),
+          DEFAULT_TYPES
+        )
       );
 
-      setProgress('Gebaeude werden geladen ...');
+      if (!types.size) {
+        setProgress(
+          'Keine Gebäudetypen ausgewählt',
+          0, 0, 0, 'warning'
+        );
+        return;
+      }
+
+      const concurrency = safeNumber(
+        await GM.getValue(KEYS.concurrency, 3),
+        3, 1, 10
+      );
+
+      const requestDelay = safeNumber(
+        await GM.getValue(KEYS.requestDelay, 100),
+        100, 0, 5000
+      );
+
+      setProgress(
+        'Gebäude werden geladen ...'
+      );
+
       const buildings = await loadBuildings(
         dispatchCenterId,
         types,
         desiredState
       );
 
-      if (buildings.length === 0) {
-        setProgress('Keine Umschaltung erforderlich', 0, 0, 0, 'success');
-        updateStatistics(0, 0, 0, 0);
+      total = buildings.length;
+
+      if (!total) {
+        setProgress(
+          'Keine Umschaltung erforderlich',
+          0, 0, 0, 'success'
+        );
         return;
       }
 
+      updateStatistics(0, 0, 0, total);
+
       let nextIndex = 0;
-      let completed = 0;
-      let errors = 0;
-      let changed = 0;
-      updateStatistics(changed, completed, errors, buildings.length);
 
       async function worker() {
         while (!cancelled) {
           const index = nextIndex++;
 
-          if (index >= buildings.length) {
-            return;
-          }
+          if (index >= total) return;
 
           const building = buildings[index];
+
           setProgress(
-            `${completed}/${buildings.length}: ${building.caption}`,
+            `${completed}/${total}: ${building.caption}`,
             completed,
             errors,
-            buildings.length
+            total
           );
 
           try {
@@ -496,114 +1132,226 @@
             changed++;
           } catch (error) {
             errors++;
+
             console.error(
-              '[De-/Activate Buildings] Gebaeude fehlgeschlagen:',
+              PREFIX,
+              'Gebäude fehlgeschlagen:',
               building.id,
               error
             );
           }
 
           completed++;
-          updateStatistics(changed, completed, errors, buildings.length);
-          setProgress(
-            `${completed}/${buildings.length} Gebaeude, ${changed} umgeschaltet`,
+
+          updateStatistics(
+            changed,
             completed,
             errors,
-            buildings.length,
-            errors ? 'warning' : 'success'
+            total
           );
-          await sleep(requestDelay);
+
+          setProgress(
+            `${completed}/${total} Gebäude, ` +
+            `${changed} umgeschaltet`,
+            completed,
+            errors,
+            total,
+            errors ? 'warning' : 'info'
+          );
+
+          if (
+            !cancelled &&
+            requestDelay > 0
+          ) {
+            await sleep(requestDelay);
+          }
         }
       }
 
       await Promise.all(
         Array.from(
-          { length: Math.min(concurrency, buildings.length) },
-          worker
+          {
+            length: Math.min(
+              concurrency,
+              total
+            )
+          },
+          () => worker()
         )
       );
 
       if (cancelled) {
-        setProgress('Abgebrochen', completed, errors, buildings.length, 'warning');
-        return;
+        setProgress(
+          `Abgebrochen: ${changed} umgeschaltet, ` +
+          `${errors} Fehler, ${total - completed} offen`,
+          completed,
+          errors,
+          total,
+          'warning'
+        );
+      } else {
+        setProgress(
+          `Fertig: ${changed} umgeschaltet, ` +
+          `${errors} Fehler`,
+          completed,
+          errors,
+          total,
+          errors ? 'warning' : 'success'
+        );
       }
+    } catch (error) {
+      console.error(
+        PREFIX,
+        'Lauf fehlgeschlagen:',
+        error
+      );
 
       setProgress(
-        `Fertig: ${changed} umgeschaltet, ${errors} Fehler`,
+        `Fehler: ${error.message ?? error}`,
         completed,
         errors,
-        buildings.length,
-        errors ? 'warning' : 'success'
+        total,
+        'danger'
       );
-    } catch (error) {
-      console.error('[De-/Activate Buildings] Lauf fehlgeschlagen:', error);
-      setProgress(`Fehler: ${error.message ?? error}`, 0, 0, 0, 'danger');
     } finally {
       running = false;
-      button.disabled = false;
+
+      for (const button of buttons) {
+        button.disabled = false;
+      }
+
       finishProgress();
     }
   }
 
+  /*
+   * ==========================================
+   * BUTTONS IN DER LEITSTELLE
+   * ==========================================
+   */
+
   function settingsButton() {
-    const button = document.createElement('a');
-    button.className = 'btn btn-default btn-xs';
-    button.href = `/settings/index#${SETTINGS_IDENTIFIER}`;
-    button.target = '_blank';
-    button.title = 'Einstellungen';
-    const icon = document.createElement('span');
-    icon.className = 'glyphicon glyphicon-cog';
-    button.append(icon);
-    return button;
+    const link = el(
+      'a',
+      'btn btn-default btn-xs'
+    );
+
+    link.href =
+      `/settings/index#${SETTINGS_IDENTIFIER}`;
+
+    link.target = '_blank';
+    link.title = 'Einstellungen';
+
+    link.append(
+      el(
+        'span',
+        'glyphicon glyphicon-cog'
+      )
+    );
+
+    return link;
   }
 
   function addButtons() {
-    const heading = document.querySelector('h1[building_type]');
+    const heading = document.querySelector(
+      'h1[building_type]'
+    );
 
     if (
-      Number(heading?.getAttribute('building_type')) !== 7 ||
-      document.getElementById('nilspe-ab-buttons')
+      Number(
+        heading?.getAttribute('building_type')
+      ) !== 7 ||
+      document.getElementById(
+        'nilspe-ab-buttons'
+      )
     ) {
       return;
     }
 
-    const details = document.querySelector('.building-title ~ dl.dl-horizontal');
+    const details = document.querySelector(
+      '.building-title ~ dl.dl-horizontal'
+    );
 
-    if (!details) {
-      return;
-    }
+    if (!details) return;
 
-    const term = document.createElement('dt');
-    const strong = document.createElement('strong');
-    strong.textContent = 'Gebaeude:';
-    term.append(strong);
-    const description = document.createElement('dd');
-    const group = document.createElement('div');
+    const term = el('dt');
+
+    term.append(
+      el('strong', '', 'Gebäude:')
+    );
+
+    const description = el('dd');
+
+    const group = el(
+      'div',
+      'btn-group'
+    );
+
     group.id = 'nilspe-ab-buttons';
-    group.className = 'btn-group';
-    const activate = document.createElement('button');
+
+    const activate = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Aktivieren'
+    );
+
+    const deactivate = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Deaktivieren'
+    );
+
     activate.type = 'button';
-    activate.className = 'btn btn-default btn-xs';
-    activate.textContent = 'Aktivieren';
-    activate.addEventListener('click', () => run(true, activate));
-    const deactivate = document.createElement('button');
     deactivate.type = 'button';
-    deactivate.className = 'btn btn-default btn-xs';
-    deactivate.textContent = 'Deaktivieren';
-    deactivate.addEventListener('click', () => run(false, deactivate));
-    group.append(activate, deactivate, settingsButton());
+
+    buttons = [activate, deactivate];
+
+    activate.addEventListener(
+      'click',
+      () => void run(true)
+    );
+
+    deactivate.addEventListener(
+      'click',
+      () => void run(false)
+    );
+
+    group.append(
+      activate,
+      deactivate,
+      settingsButton()
+    );
+
     description.append(group);
     details.append(term, description);
   }
 
-  if (location.pathname.startsWith('/settings/index')) {
+  /*
+   * ==========================================
+   * INITIALISIERUNG
+   * ==========================================
+   */
+
+  if (
+    location.pathname.startsWith(
+      '/settings/index'
+    )
+  ) {
     await createSettings();
   } else {
     addButtons();
-    new MutationObserver(addButtons).observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-})();
 
+    new MutationObserver(addButtons).observe(
+      document.body,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+  }
+
+  console.log(
+    PREFIX,
+    `Version ${VERSION} geladen`
+  );
+})();
