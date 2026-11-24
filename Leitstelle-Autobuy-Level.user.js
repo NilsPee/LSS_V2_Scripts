@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Level
 // @namespace    NilsPe.autobuy.level.api
-// @version      2.8.1
+// @version      2.8.2
 // @description  Direktausbau bis zur absoluten Zielstufe mit Weiterleitungs- und Sicherheitsprüfung
 // @author       NilsPe
 // @license      MIT
@@ -25,7 +25,7 @@
   'use strict';
 
   const PREFIX = '[Autobuy Level]';
-  const VERSION = '2.8.1';
+  const VERSION = '2.8.2';
 
   const BUILDING_TYPES = [
     { id: 0, label: 'Feuerwache', maxLevel: 19 },
@@ -122,14 +122,14 @@
         name.textContent = `${type.label} (${type.id})`;
         name.style.whiteSpace = 'nowrap';
         const levels = document.createElement('div');
-        levels.style.cssText = 'display:flex;flex-wrap:nowrap;gap:4px';
+        levels.style.cssText = 'display:flex;align-items:center;flex-wrap:nowrap;gap:4px';
         const levelButtons = [];
         for (let level = 1; level <= type.maxLevel; level++) {
           const button = document.createElement('button');
           button.type = 'button';
           button.className = 'btn btn-default btn-xs';
           button.textContent = String(level);
-          button.style.minWidth = '28px';
+          button.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:28px;height:28px;margin:0;padding:2px 5px;vertical-align:middle;font-size:13px;line-height:1';
           button.title = `Zielstufe ${level}`;
           button.addEventListener('click', async () => {
             target = target === level ? 0 : level;
@@ -141,7 +141,7 @@
         }
         const toggle = document.createElement('button');
         toggle.type = 'button';
-        toggle.style.width = '32px';
+        toggle.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:32px;height:28px;margin:0;padding:2px 5px;vertical-align:middle;font-size:13px;line-height:1';
         function updateRow() {
           row.style.background = active ? 'rgba(92, 184, 92, .10)' : '#8881';
           row.style.borderColor = active ? 'rgba(92, 184, 92, .35)' : '#8885';
