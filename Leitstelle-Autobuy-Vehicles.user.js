@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Vehicles
 // @namespace    NilsPe.autobuy.vehicles
-// @version      1.2.5
+// @version      1.6.1
 // @description  Kauft konfigurierte Fahrzeuge fuer einzelne Gebaeude oder eine Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -11,6 +11,8 @@
 // @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Autobuy-Vehicles.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
+// @match        https://leitstellenspiel.de/buildings/*
+// @match        https://leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
@@ -24,10 +26,13 @@
 
   const SETTINGS_IDENTIFIER = 'nilspe_autobuy_vehicles';
   const CONFIG_KEY_PREFIX = 'nilspe_abv_config_';
+  const DISABLED_KEY_PREFIX = 'nilspe_abv_disabled_';
   const VEHICLE_DELAY_KEY = 'nilspe_abv_vehicle_delay';
   const BUILDING_DELAY_KEY = 'nilspe_abv_building_delay';
   const DEFAULT_VEHICLE_DELAY = 150;
   const DEFAULT_BUILDING_DELAY = 100;
+  let running = false;
+  let cancelled = false;
 
   const BUILDING_TYPES = [
     [0, 'Feuerwache'],
@@ -47,7 +52,8 @@
     [24, 'Reiterstaffel'],
     [25, 'Bergrettung'],
     [26, 'Seenotrettungswache'],
-    [28, 'Hubschrauberstation (Seenotrettung)']
+    [28, 'Hubschrauberstation (Seenotrettung)'],
+    [29, 'Autobahnpolizei']
   ].map(([id, label]) => ({ id, label }));
 
   const BUILDING_TYPE_BY_ID = new Map(
@@ -86,7 +92,8 @@
       [143, 'Anh Schlauch'], [162, 'RW Schiene'], [163, 'HLF Schiene'],
       [164, 'AB Schiene'], [166, 'PTLF 4000'], [167, 'SLF'],
       [168, 'Anh Sonderloeschmittel'], [169, 'AB-Sonderloeschmittel'],
-      [170, 'AB-Wasser/Schaum']
+      [170, 'AB-Wasser/Schaum'], [179, 'AB-NEA50'], [180, 'AB-NEA200'],
+      [185, 'GW-Tierrettung'], [186, 'Anh Tierrettung']
     ]],
     [18, []],
     [2, [
@@ -110,7 +117,10 @@
       [122, 'LKW 7 Lbw (FGr E)'], [123, 'LKW 7 Lbw (FGr WP)'],
       [124, 'MTW-OV'], [125, 'MTW-TR UL (Drohne)'],
       [144, 'FueKW (THW)'], [145, 'FueKomKW'], [146, 'Anh FueLa'],
-      [147, 'FmKW'], [148, 'MTW-FGr K']
+      [147, 'FmKW'], [148, 'MTW-FGr K'],
+      [176, 'LKW 7 Lbw (FGr Log-V)'], [177, 'MTW-FGr Log-V'],
+      [178, 'Anh 12 Lbw (FGr Log-V)'], [181, 'MzGW (FGr BrB)'],
+      [182, 'Mobilkran'], [183, 'Anh Plattform (FGr BrB)']
     ]],
     [11, [
       [35, 'leBefKw'], [50, 'GruKw'], [51, 'FueKw'], [52, 'GefKw'],
@@ -129,8 +139,22 @@
       [171, 'GW TeSi'], [172, 'LKW Technik (Notstrom)'],
       [173, 'MTW TeSi'], [174, 'Anh TeSi'], [175, 'NEA 50']
     ]],
-    [13, [[61, 'Polizeihubschrauber'], [99, 'Aussenlastbehaelter']]],
-    [15, [[63, 'GW-Taucher'], [64, 'GW-Wasserrettung'], [70, 'MZB']]]
+    [13, [[61, 'Polizeihubschrauber'], [96, 'Außenlastbehälter'],
+      [156, 'Polizeihubschrauber mit Winde']]],
+    [15, [[63, 'GW-Taucher'], [64, 'GW-Wasserrettung'], [70, 'MZB']]],
+    [5, [[31, 'RTH'], [157, 'RTH Winde']]],
+    [17, [[79, 'SEK - ZF'], [80, 'SEK - MTF'], [81, 'MEK - ZF'], [82, 'MEK - MTF']]],
+    [21, [[91, 'Rettungshundefahrzeug']]],
+    [24, [[134, 'Pferdetransporter klein'], [135, 'Pferdetransporter groß'],
+      [136, 'Anh Pferdetransport'], [137, 'Zugfahrzeug Pferdetransport']]],
+    [25, [[149, 'GW-Bergrettung (NEF)'], [150, 'GW-Bergrettung'],
+      [151, 'ELW Bergrettung'], [152, 'ATV'],
+      [153, 'Hundestaffel (Bergrettung)'], [154, 'Schneefahrzeug'],
+      [155, 'Anh Höhenrettung (Bergrettung)'],
+      [158, 'GW-Höhenrettung (Bergrettung)']]],
+    [26, [[159, 'Seenotrettungskreuzer'], [160, 'Seenotrettungsboot']]],
+    [28, [[161, 'Hubschrauber (Seenotrettung)']]],
+    [29, [[32, 'FuStW'], [184, 'FuStW (AP)']]]
   ]);
 
   KNOWN_VEHICLES.set(18, KNOWN_VEHICLES.get(0));
@@ -209,22 +233,32 @@
   }
 
   async function loadConfiguration(buildingType) {
-    return parseConfiguration(
+    const configuration = parseConfiguration(
       await GM.getValue(configurationKey(buildingType), '[]')
     );
+    const disabled = new Set(JSON.parse(
+      await GM.getValue(`${DISABLED_KEY_PREFIX}${buildingType}`, '[]')
+    ));
+    for (const id of disabled) configuration.delete(Number(id));
+    return configuration;
   }
 
   async function saveConfiguration(buildingType, row) {
     const configuration = [];
+    const disabled = [];
 
     for (const input of row.querySelectorAll('input[data-vehicle-type]')) {
       const vehicleType = Number(input.dataset.vehicleType);
       const count = Number(input.value);
+      const enabled = row.querySelector(
+        `input[data-enabled-type="${vehicleType}"]`
+      )?.checked;
 
       if (Number.isInteger(vehicleType) &&
           Number.isInteger(count) &&
           count > 0) {
         configuration.push([vehicleType, count]);
+        if (!enabled) disabled.push(vehicleType);
       }
     }
 
@@ -232,6 +266,53 @@
       configurationKey(buildingType),
       JSON.stringify(configuration)
     );
+    await GM.setValue(
+      `${DISABLED_KEY_PREFIX}${buildingType}`,
+      JSON.stringify(disabled)
+    );
+  }
+
+  async function discoverVehicleOptions() {
+    const db = await openCurrentDb();
+    let buildings;
+    try {
+      buildings = await getAllData(db, 'buildings');
+    } finally {
+      db.close();
+    }
+
+    const sampleByType = new Map();
+    for (const building of buildings) {
+      const type = Number(building.building_type);
+      if (BUILDING_TYPE_BY_ID.has(type) && !sampleByType.has(type)) {
+        sampleByType.set(type, Number(building.id));
+      }
+    }
+
+    const discovered = new Map();
+    await Promise.all([...sampleByType].map(async ([type, id]) => {
+      try {
+        const response = await fetch(`/buildings/${id}/vehicles/new`, {
+          credentials: 'same-origin', cache: 'no-store'
+        });
+        if (!response.ok) return;
+        const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const options = new Map();
+        for (const link of page.querySelectorAll('section.purchase a[href]')) {
+          const path = new URL(link.getAttribute('href'), location.origin).pathname;
+          const match = path.match(/\/vehicle\/\d+\/(\d+)\/credits$/);
+          if (!match) continue;
+          const section = link.closest('section.purchase');
+          const name = section?.dataset.vehicleName ||
+            section?.closest('.vehicle_type')?.querySelector('b')?.textContent?.trim();
+          options.set(Number(match[1]), name || `Fahrzeug ${match[1]}`);
+        }
+        discovered.set(type, options);
+      } catch (error) {
+        console.warn('[Autobuy Vehicles] Fahrzeugoptionen nicht geladen:', type, error);
+      }
+    }));
+    return discovered;
   }
 
   async function createVehicleSettingsSection(panel) {
@@ -240,37 +321,90 @@
     const heading = document.createElement('h2');
     heading.textContent = 'Fahrzeuge je Gebaeudetyp';
     section.append(heading);
+    let discovered = new Map();
+    try {
+      discovered = await discoverVehicleOptions();
+    } catch (error) {
+      console.warn('[Autobuy Vehicles] Fahrzeugoptionen aus Cache nicht geladen:', error);
+    }
 
     for (const buildingType of BUILDING_TYPES) {
       const options = new Map(
         (KNOWN_VEHICLES.get(buildingType.id) ?? [])
           .map(([id, name]) => [id, { id, name }])
       );
+      for (const [id, name] of discovered.get(buildingType.id) ?? []) {
+        options.set(id, { id, name });
+      }
 
       if (options.size === 0) {
         continue;
       }
 
-      const stored = await loadConfiguration(buildingType.id);
-      const wrapper = document.createElement('div');
+      const stored = parseConfiguration(
+        await GM.getValue(configurationKey(buildingType.id), '[]')
+      );
+      const disabled = new Set(JSON.parse(
+        await GM.getValue(`${DISABLED_KEY_PREFIX}${buildingType.id}`, '[]')
+      ));
+      const wrapper = document.createElement('details');
       wrapper.className = 'form-group';
       wrapper.style.paddingBottom = '12px';
       wrapper.style.marginBottom = '12px';
       wrapper.style.borderBottom = '1px solid #777';
-      const label = document.createElement('h3');
+      const label = document.createElement('summary');
       label.textContent = `${buildingType.id} ${buildingType.label}`;
+      const countLabel = document.createElement('span');
+      countLabel.className = 'label label-default';
+      countLabel.style.marginLeft = '10px';
+      label.append(countLabel);
       const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.flexWrap = 'wrap';
-      row.style.gap = '12px';
+      row.style.display = 'grid';
+      row.style.gap = '4px';
+      const toolbar = document.createElement('div');
+      toolbar.style.margin = '10px 0';
+      toolbar.style.display = 'flex';
+      toolbar.style.gap = '5px';
+      function updateCount() {
+        const active = [...row.querySelectorAll('input[data-enabled-type]')]
+          .filter(input => input.checked).length;
+        countLabel.textContent = `${active} / ${options.size} ausgewählt`;
+        countLabel.className = active ? 'label label-success' : 'label label-default';
+      }
+      for (const [text, checked, color] of [
+        ['Alle auswählen', true, 'btn-success'],
+        ['Alle abwählen', false, 'btn-danger']
+      ]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-xs ${color}`;
+        button.style.width = '78px';
+        button.style.paddingLeft = '2px';
+        button.style.paddingRight = '2px';
+        button.textContent = text;
+        button.addEventListener('click', () => {
+          for (const input of row.querySelectorAll('input[data-enabled-type]')) {
+            input.checked = checked;
+            input.dispatchEvent(new Event('change'));
+          }
+        });
+        toolbar.append(button);
+      }
 
       for (const option of [...options.values()].sort((a, b) =>
         a.name.localeCompare(b.name, 'de')
       )) {
-        const field = document.createElement('label');
-        field.style.minWidth = '110px';
-        field.style.maxWidth = '180px';
-        field.textContent = option.name;
+        const field = document.createElement('div');
+        field.style.display = 'grid';
+        field.style.gridTemplateColumns = '90px minmax(150px, 1fr) 60px';
+        field.style.alignItems = 'center';
+        field.style.gap = '12px';
+        field.style.padding = '6px 8px';
+        field.style.border = '1px solid #8885';
+        field.style.borderRadius = '3px';
+        field.style.marginBottom = '3px';
+        const name = document.createElement('span');
+        name.textContent = `${option.name} (${option.id})`;
         const input = document.createElement('input');
         input.type = 'number';
         input.min = '0';
@@ -278,14 +412,47 @@
         input.style.width = '85px';
         input.dataset.vehicleType = String(option.id);
         input.value = stored.get(option.id) ?? '';
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.style.display = 'none';
+        toggle.dataset.enabledType = String(option.id);
+        toggle.checked = !disabled.has(option.id);
+        const toggleButton = document.createElement('button');
+        toggleButton.type = 'button';
+        toggleButton.style.width = '32px';
+        toggleButton.addEventListener('click', () => {
+          toggle.checked = !toggle.checked;
+          toggle.dispatchEvent(new Event('change'));
+        });
+        function updateColor() {
+          field.style.background = toggle.checked
+            ? 'rgba(92, 184, 92, .10)' : '#8881';
+          field.style.borderColor = toggle.checked
+            ? 'rgba(92, 184, 92, .35)' : '#8885';
+          name.style.opacity = toggle.checked ? '1' : '.6';
+          toggleButton.textContent = toggle.checked ? '✕' : '✓';
+          toggleButton.className = toggle.checked
+            ? 'btn btn-danger btn-xs' : 'btn btn-success btn-xs';
+          toggleButton.title = toggle.checked
+            ? 'Fahrzeug abwählen' : 'Fahrzeug auswählen';
+        }
         input.addEventListener('change', () =>
           saveConfiguration(buildingType.id, row)
         );
-        field.append(input);
+        toggle.addEventListener('change', () => {
+          updateColor();
+          updateCount();
+          void saveConfiguration(buildingType.id, row);
+        });
+        input.addEventListener('input', updateColor);
+        name.addEventListener('click', () => toggleButton.click());
+        field.append(input, name, toggle, toggleButton);
+        updateColor();
         row.append(field);
       }
 
-      wrapper.append(label, row);
+      updateCount();
+      wrapper.append(label, toolbar, row);
       section.append(wrapper);
     }
 
@@ -298,7 +465,7 @@
   }
 
   async function createSettings() {
-    if (typeof addOptions !== 'function') {
+    if (typeof waitForSettingsDom !== 'function' || typeof createSettingsPane !== 'function') {
       const warning = document.createElement('div');
       warning.className = 'alert alert-danger';
       warning.textContent = 'Autobuy Vehicles: NilsPe-Skriptbasis fehlt.';
@@ -306,34 +473,47 @@
       return;
     }
 
-    await addOptions({
-      identifier: SETTINGS_IDENTIFIER,
-      title: 'Autobuy Vehicles',
-      settings: [
-        { type: 'header', text: 'Ablauf' },
-        {
-          type: 'number',
-          key: VEHICLE_DELAY_KEY,
-          label: 'Pause nach einem Fahrzeugkauf [ms]',
-          default: DEFAULT_VEHICLE_DELAY,
-          min: 0,
-          max: 5_000
-        },
-        {
-          type: 'number',
-          key: BUILDING_DELAY_KEY,
-          label: 'Pause nach einem Gebaeude [ms]',
-          default: DEFAULT_BUILDING_DELAY,
-          min: 0,
-          max: 5_000
-        }
-      ]
-    });
-
-    const panel = document.getElementById(SETTINGS_IDENTIFIER);
-
-    if (panel) {
+    if (!await waitForSettingsDom()) return;
+    const { anchor, body } = createSettingsPane(SETTINGS_IDENTIFIER, 'Autobuy Vehicles');
+    let rendered = false;
+    async function render() {
+      if (rendered) return;
+      rendered = true;
+      const panel = document.createElement('div');
+      const tabBody = document.createElement('div');
+      tabBody.className = 'settings-tab-body';
+      panel.append(tabBody);
       await createVehicleSettingsSection(panel);
+      body.append(...tabBody.childNodes);
+      const heading = document.createElement('h2');
+      heading.textContent = 'Ablauf';
+      body.append(heading);
+      for (const [key, label, fallback] of [
+        [VEHICLE_DELAY_KEY, 'Pause nach einem Fahrzeugkauf [ms]', DEFAULT_VEHICLE_DELAY],
+        [BUILDING_DELAY_KEY, 'Pause nach einem Gebäude [ms]', DEFAULT_BUILDING_DELAY]
+      ]) {
+        const row = document.createElement('label');
+        row.style.display = 'block';
+        row.style.marginBottom = '10px';
+        row.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '5000';
+        input.className = 'form-control';
+        input.style.width = '130px';
+        input.value = await GM.getValue(key, fallback);
+        input.addEventListener('change', () => {
+          void GM.setValue(key, Math.min(5000, Math.max(0, Number(input.value) || 0)));
+        });
+        row.append(input);
+        body.append(row);
+      }
+    }
+    anchor.addEventListener('click', () => void render());
+    if (location.hash === `#${SETTINGS_IDENTIFIER}`) {
+      await render();
+      anchor.click();
     }
   }
 
@@ -424,7 +604,7 @@
   }
 
   function vehicleTabPane() {
-    return document.querySelector('#tab_vehicle, #tab_vehicles');
+    return document.querySelector('#vehicle, #tab_vehicle, #tab_vehicles');
   }
 
   function isVisible(element) {
@@ -442,7 +622,7 @@
     const pane = vehicleTabPane();
     const text = (pane?.textContent ?? '').replace(/\s+/g, ' ').trim();
 
-    return /keine fahrzeuge|keine daten|no data/i.test(text);
+    return /hat keine fahrzeuge|keine fahrzeuge|keine daten|no data/i.test(text);
   }
 
   function vehicleTableIsProcessing() {
@@ -473,10 +653,11 @@
 
   async function loadVehicleTable() {
     const tabLink = document.querySelector(
-      'a[href="#tab_vehicle"], a[href="#tab_vehicles"]'
+      'a[href="#vehicle"], a[href="#tab_vehicle"], a[href="#tab_vehicles"]'
     );
 
-    if (!tabLink && !document.getElementById('vehicle_table')) {
+    if (!tabLink && !document.getElementById('vehicle_table') &&
+        !vehicleTabShowsEmptyState()) {
       throw new Error('Der Fahrzeug-Tab wurde nicht gefunden.');
     }
 
@@ -549,7 +730,7 @@
     return counts;
   }
 
-  async function buyVehicle(buildingId, vehicleType) {
+  async function buyVehicle(buildingId, vehicleType, quantity = 1) {
     const token = csrfToken();
 
     if (!token) {
@@ -558,7 +739,8 @@
 
     const url =
       `/buildings/${buildingId}/vehicle/${buildingId}/${vehicleType}` +
-      `/credits?building=${buildingId}`;
+      `/credits?building=${buildingId}` +
+      (quantity > 1 ? `&quantity=${quantity}` : '');
     const response = await fetch(url, {
       method: 'POST',
       credentials: 'same-origin',
@@ -579,6 +761,38 @@
     }
   }
 
+  async function availablePurchase(buildingId, vehicleType) {
+    const response = await fetch(`/buildings/${buildingId}/vehicles/new`, {
+      credentials: 'same-origin',
+      cache: 'no-store'
+    });
+    if (!response.ok) {
+      throw new Error(`Fahrzeugangebote: HTTP ${response.status}`);
+    }
+
+    const documentForBuilding = new DOMParser().parseFromString(
+      await response.text(), 'text/html'
+    );
+    if (documentForBuilding.querySelector('input[type="password"]')) {
+      throw new Error('Anmeldung erforderlich.');
+    }
+    const expectedPath = `/vehicle/${buildingId}/${vehicleType}/credits`;
+    const link = [...documentForBuilding.querySelectorAll('section.purchase a[href]')]
+      .find(candidate => new URL(candidate.getAttribute('href'), location.origin)
+        .pathname.endsWith(expectedPath));
+    if (!link || link.getAttribute('aria-disabled') === 'true' ||
+        link.classList.contains('disabled')) {
+      return 0;
+    }
+
+    const purchase = link.closest('section.purchase');
+    const input = purchase?.querySelector('input.quantity-input');
+    if (!input) return 1;
+
+    const maximum = Number(purchase.dataset.max ?? input.max);
+    return Number.isInteger(maximum) && maximum > 0 ? maximum : 0;
+  }
+
     async function processBuilding(
       building,
       counts,
@@ -594,15 +808,23 @@
       let bought = 0;
 
       for (const [vehicleType, wanted] of configuration) {
+        if (cancelled) break;
         const key = `${building.id}:${vehicleType}`;
         const current = counts.get(key) ?? 0;
 
-        for (let index = current; index < wanted; index++) {
-          await buyVehicle(building.id, vehicleType);
-
-          counts.set(key, (counts.get(key) ?? 0) + 1);
-          bought++;
-
+        let missing = Math.max(0, wanted - current);
+        while (missing > 0 && !cancelled) {
+          const available = await availablePurchase(building.id, vehicleType);
+          if (available === 0) {
+            console.info('[Autobuy Vehicles] Derzeit nicht kaufbar:',
+              building.id, vehicleType, `${missing} fehlen`);
+            break;
+          }
+          const quantity = Math.min(missing, available);
+          await buyVehicle(building.id, vehicleType, quantity);
+          counts.set(key, (counts.get(key) ?? 0) + quantity);
+          bought += quantity;
+          missing -= quantity;
           await sleep(vehicleDelay);
         }
       }
@@ -624,21 +846,36 @@
         right: 0;
         bottom: 0;
         z-index: 2147483000;
-        padding: 7px 12px;
-        border-top: 1px solid #ddd;
-        background: #f8f8f8;
+        padding: 9px 12px;
+        border-top: 1px solid #888;
+        background: #333;
+        color: #fff;
+      }
+      #nilspe-abv-progress-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      #nilspe-abv-statistics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        margin-top: 6px;
+        font-size: 12px;
       }
       #nilspe-abv-track {
         height: 12px;
-        margin-top: 5px;
+        margin-top: 6px;
         overflow: hidden;
         border-radius: 4px;
-        background: #ddd;
+        background: #777;
       }
       #nilspe-abv-fill {
         height: 100%;
         width: 0;
         background: #5cb85c;
+        transition: width .15s;
       }
     `;
     document.head.append(style);
@@ -649,12 +886,38 @@
     status.id = 'nilspe-abv-status';
     status.className = 'label label-info';
     status.textContent = 'Bereit';
+    const row = document.createElement('div');
+    row.id = 'nilspe-abv-progress-row';
+    const stop = document.createElement('button');
+    stop.id = 'nilspe-abv-stop';
+    stop.type = 'button';
+    stop.className = 'btn btn-danger btn-xs';
+    stop.textContent = 'Abbrechen';
+    stop.addEventListener('click', () => {
+      cancelled = true;
+      stop.disabled = true;
+      status.textContent = 'Abbruch – laufende Anfrage wird beendet...';
+    });
+    const close = document.createElement('button');
+    close.id = 'nilspe-abv-close';
+    close.type = 'button';
+    close.className = 'btn btn-default btn-xs';
+    close.textContent = 'Schließen';
+    close.disabled = true;
+    close.addEventListener('click', () => {
+      if (running) return;
+      container.remove();
+      style.remove();
+    });
+    row.append(stop, status, close);
+    const statistics = document.createElement('div');
+    statistics.id = 'nilspe-abv-statistics';
     const track = document.createElement('div');
     track.id = 'nilspe-abv-track';
     const fill = document.createElement('div');
     fill.id = 'nilspe-abv-fill';
     track.append(fill);
-    container.append(status, track);
+    container.append(row, statistics, track);
     document.body.append(container);
   }
 
@@ -664,17 +927,34 @@
     const fill = document.getElementById('nilspe-abv-fill');
     status.className = `label label-${style}`;
     status.textContent = message;
-    fill.style.width = total > 0 ? `${completed / total * 100}%` : '0%';
+    fill.style.width = total > 0
+      ? `${Math.min(100, completed / total * 100)}%` : '0%';
   }
 
-  function removeProgressBar(delay = 1_500) {
-    setTimeout(() => {
-      document.getElementById('nilspe-abv-progress')?.remove();
-      document.getElementById('nilspe-abv-style')?.remove();
-    }, delay);
+  function updateStatistics(completed, total, bought, errors) {
+    const element = document.getElementById('nilspe-abv-statistics');
+    if (!element) return;
+    const format = value => Number(value).toLocaleString('de-DE');
+    element.replaceChildren();
+    for (const entry of [
+      `Gekaufte Fahrzeuge: ${format(bought)}`,
+      `Fehler: ${format(errors)}`,
+      `Wachen: ${format(completed)}/${format(total)}`
+    ]) {
+      const span = document.createElement('span');
+      span.textContent = entry;
+      element.append(span);
+    }
   }
 
     async function runForBuildings(buildings) {
+      if (running) return;
+      running = true;
+      cancelled = false;
+      ensureProgressBar();
+      document.getElementById('nilspe-abv-stop').disabled = false;
+      document.getElementById('nilspe-abv-close').disabled = true;
+      try {
       const delays = await configuredDelays();
       const configurationByBuildingType = new Map();
 
@@ -705,7 +985,7 @@
           'warning'
         );
 
-        removeProgressBar();
+        updateStatistics(0, 0, 0, 0);
         return;
       }
 
@@ -718,10 +998,12 @@
       let completed = 0;
       let errors = 0;
       let totalBought = 0;
+      updateStatistics(0, configuredBuildings.length, 0, 0);
 
       await runWithConcurrency(
         configuredBuildings,
         async building => {
+          if (cancelled) return;
           setProgress(
             `${completed}/${configuredBuildings.length}: ${building.caption}`,
             completed,
@@ -752,6 +1034,7 @@
           }
 
           completed++;
+          updateStatistics(completed, configuredBuildings.length, totalBought, errors);
 
           setProgress(
             `${completed}/${configuredBuildings.length} Gebaeude, ${totalBought} gekauft`,
@@ -764,13 +1047,16 @@
       );
 
       setProgress(
-        `Fertig: ${totalBought} Fahrzeuge gekauft, ${errors} Fehler`,
+        cancelled ? 'Abgebrochen' : `Fertig: ${totalBought} Fahrzeuge gekauft, ${errors} Fehler`,
         completed,
         configuredBuildings.length,
-        errors ? 'warning' : 'success'
+        cancelled || errors ? 'warning' : 'success'
       );
-
-      removeProgressBar();
+      } finally {
+        running = false;
+        document.getElementById('nilspe-abv-stop').disabled = true;
+        document.getElementById('nilspe-abv-close').disabled = false;
+      }
     }
 
   function settingsButton() {
