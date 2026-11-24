@@ -1,8 +1,9 @@
+
 // ==UserScript==
 // @name         Leitstelle Rename Buildings
 // @namespace    NilsPe.rename.buildings
-// @version      1.0.0
-// @description  Benennt Gebaeude einer Leitstelle nach Typ, Namens-Suffix und fortlaufender Nummer um
+// @version      1.1.1
+// @description  Benennt Gebäude nach Typ, Namenssuffix und fortlaufender Nummer um
 // @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
@@ -22,10 +23,8 @@
 (async function () {
   'use strict';
 
-  // ============================================================
-  // Einstellungen
-  // ============================================================
-
+  const VERSION = '1.1.1';
+  const PREFIX = '[Leitstelle Rename Buildings]';
   const SETTINGS_IDENTIFIER = 'nilspe_rename_buildings';
 
   const KEYS = {
@@ -36,34 +35,54 @@
     requestDelay: 'nilspe_rename_buildings_request_delay'
   };
 
-  // ============================================================
-  // Gebaeudetypen
-  //
-  // defaultName ist nur der voreingestellte Name.
-  // Ein leeres Feld bedeutet: Typ wird nicht umbenannt.
-  // ============================================================
+  /*
+   * ==========================================
+   * GEBÄUDETYPEN
+   * ==========================================
+   *
+   * Bestehende Typen behalten ihre
+   * bisherigen Speicherkeys und Namen.
+   *
+   * Neu in v1.1.1 ergänzte Typen:
+   * 1, 3, 8, 10, 14, 22, 23, 27, 29
+   *
+   * Für neu ergänzte Typen gilt zunächst
+   * defaultName = ''.
+   *
+   * Damit werden sie erst umbenannt,
+   * nachdem ein Name eingetragen wurde.
+   */
 
   const BUILDING_TYPES = [
-    { id: 0,  name: 'Feuerwache',                         defaultName: 'Feuerwache' },
-    { id: 2,  name: 'Rettungswache',                      defaultName: 'Rettungswache' },
-    { id: 4,  name: 'Krankenhaus',                        defaultName: 'KH' },
-    { id: 5,  name: 'Rettungshubschrauber-Station',       defaultName: 'RTH' },
-    { id: 6,  name: 'Polizeiwache',                       defaultName: 'Polizeiwache' },
-    { id: 9,  name: 'THW-Ortsverband',                    defaultName: 'THW' },
-    { id: 11, name: 'Bereitschaftspolizei',               defaultName: 'Bepol' },
-    { id: 12, name: 'Schnelleinsatzgruppe (SEG)',         defaultName: 'SEG' },
-    { id: 13, name: 'Polizeihubschrauberstation',         defaultName: 'Polizeihubschrauber' },
-    { id: 15, name: 'Wasserrettung',                       defaultName: 'Wasserrettung' },
-    { id: 16, name: 'Verbandszellen',                     defaultName: 'JVA' },
-    { id: 17, name: 'Polizei-Sondereinheiten',            defaultName: 'Sondereinheiten' },
-    { id: 18, name: 'Feuerwache (Kleinwache)',            defaultName: 'Feuerwache' },
-    { id: 19, name: 'Polizeiwache (Kleinwache)',          defaultName: 'Polizeiwache' },
-    { id: 20, name: 'Rettungswache (Kleinwache)',         defaultName: 'Rettungswache' },
-    { id: 21, name: 'Rettungshundestaffel',               defaultName: 'Rettungshunde' },
-    { id: 24, name: 'Reiterstaffel',                       defaultName: 'Reiterstaffel' },
-    { id: 25, name: 'Bergrettung',                         defaultName: 'Bergrettung' },
-    { id: 26, name: 'Seenotrettungswache',                 defaultName: 'Seenotrettung' },
-    { id: 28, name: 'Hubschrauberstation (Seenotrettung)', defaultName: 'Seenotrettung RTH' }
+    { id: 0, name: 'Feuerwache', defaultName: 'Feuerwache' },
+    { id: 1, name: 'Feuerwehrschule', defaultName: '' },
+    { id: 2, name: 'Rettungswache', defaultName: 'Rettungswache' },
+    { id: 3, name: 'Rettungsschule', defaultName: '' },
+    { id: 4, name: 'Krankenhaus', defaultName: 'KH' },
+    { id: 5, name: 'Rettungshubschrauber-Station', defaultName: 'RTH' },
+    { id: 6, name: 'Polizeiwache', defaultName: 'Polizeiwache' },
+    { id: 8, name: 'Polizeischule', defaultName: '' },
+    { id: 9, name: 'THW-Ortsverband', defaultName: 'THW' },
+    { id: 10, name: 'THW-Bundesschule', defaultName: '' },
+    { id: 11, name: 'Bereitschaftspolizei', defaultName: 'Bepol' },
+    { id: 12, name: 'Schnelleinsatzgruppe (SEG)', defaultName: 'SEG' },
+    { id: 13, name: 'Polizeihubschrauberstation', defaultName: 'Polizeihubschrauber' },
+    { id: 14, name: 'Bereitstellungsraum', defaultName: '' },
+    { id: 15, name: 'Wasserrettung', defaultName: 'Wasserrettung' },
+    { id: 16, name: 'Verbandszellen', defaultName: 'JVA' },
+    { id: 17, name: 'Polizei-Sondereinheiten', defaultName: 'Sondereinheiten' },
+    { id: 18, name: 'Feuerwache (Kleinwache)', defaultName: 'Feuerwache' },
+    { id: 19, name: 'Polizeiwache (Kleinwache)', defaultName: 'Polizeiwache' },
+    { id: 20, name: 'Rettungswache (Kleinwache)', defaultName: 'Rettungswache' },
+    { id: 21, name: 'Rettungshundestaffel', defaultName: 'Rettungshunde' },
+    { id: 22, name: 'Großer Komplex', defaultName: '' },
+    { id: 23, name: 'Kleiner Komplex', defaultName: '' },
+    { id: 24, name: 'Reiterstaffel', defaultName: 'Reiterstaffel' },
+    { id: 25, name: 'Bergrettung', defaultName: 'Bergrettung' },
+    { id: 26, name: 'Seenotrettungswache', defaultName: 'Seenotrettung' },
+    { id: 27, name: 'Schule für Seefahrt und Seenotrettung', defaultName: '' },
+    { id: 28, name: 'Hubschrauberstation (Seenotrettung)', defaultName: 'Seenotrettung RTH' },
+    { id: 29, name: 'Autobahnpolizei', defaultName: '' }
   ];
 
   for (const type of BUILDING_TYPES) {
@@ -74,153 +93,710 @@
     BUILDING_TYPES.map(type => [type.id, type])
   );
 
-  // ============================================================
-  // Status
-  // ============================================================
-
   let running = false;
+  let busy = false;
+  let cancelRequested = false;
 
-  const sleep = milliseconds =>
-    new Promise(resolve => setTimeout(resolve, milliseconds));
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
 
-  // ============================================================
-  // Einstellungen erstellen
-  // ============================================================
+  function el(tag, className = '', text = '') {
+    const element = document.createElement(tag);
+
+    if (className) element.className = className;
+    if (text) element.textContent = text;
+
+    return element;
+  }
+
+  function formatCount(value) {
+    return Number(value).toLocaleString('de-DE');
+  }
+
+  function clampInteger(value, fallback, min, max) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      return fallback;
+    }
+
+    return Math.max(
+      min,
+      Math.min(max, Math.floor(number))
+    );
+  }
+
+  /*
+   * ==========================================
+   * EINSTELLUNGEN
+   * ==========================================
+   *
+   * Sämtliche bestehenden Speicherkeys
+   * bleiben unverändert.
+   */
 
   async function initializeDefaults() {
     for (const type of BUILDING_TYPES) {
-      const stored = await GM.getValue(type.key, null);
+      const stored = await GM.getValue(
+        type.key,
+        null
+      );
 
       if (stored === null) {
-        await GM.setValue(type.key, type.defaultName);
+        await GM.setValue(
+          type.key,
+          type.defaultName
+        );
       }
     }
   }
 
+  const SETTINGS = [
+    {
+      type: 'header',
+      text: 'Benennung'
+    },
+    {
+      type: 'number',
+      key: KEYS.startNumber,
+      label: 'Startnummer',
+      info: 'Erste Nummer je Gebäudetyp.',
+      min: 0,
+      max: 999999,
+      default: 1
+    },
+    {
+      type: 'number',
+      key: KEYS.digits,
+      label: 'Nummerierung',
+      info: 'Anzahl Stellen. Beispiel: 3 = 001, 002, 003 ...',
+      min: 1,
+      max: 10,
+      default: 3
+    },
+    {
+      type: 'text',
+      key: KEYS.suffix,
+      label: 'Namens-Suffix',
+      info: 'Zum Beispiel Berlin, NRW, Köln oder Madrid.',
+      default: ''
+    },
+    {
+      type: 'header',
+      text: 'Wachentypen'
+    },
+    ...BUILDING_TYPES.map(type => ({
+      type: 'text',
+      key: type.key,
+      label: `${type.id} ${type.name}`,
+      info: 'Leer lassen, wenn dieser Gebäudetyp nicht umbenannt werden soll.',
+      default: type.defaultName
+    })),
+    {
+      type: 'header',
+      text: 'Ablauf'
+    },
+    {
+      type: 'number',
+      key: KEYS.concurrency,
+      label: 'Parallele Umbenennungen',
+      min: 1,
+      max: 5,
+      default: 3
+    },
+    {
+      type: 'number',
+      key: KEYS.requestDelay,
+      label: 'Pause je Worker [ms]',
+      min: 0,
+      max: 5000,
+      default: 150
+    }
+  ];
+
+  /*
+   * ==========================================
+   * EINHEITLICHER EINSTELLUNGSSTANDARD
+   * ==========================================
+   */
+
+  function injectSettingsStyles() {
+    if (
+      document.getElementById(
+        'nilspe-rb-settings-style'
+      )
+    ) {
+      return;
+    }
+
+    const style = el('style');
+    style.id = 'nilspe-rb-settings-style';
+
+    style.textContent = `
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-root {
+        margin-bottom: 24px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-info {
+        margin-bottom: 10px;
+        font-size: 12px;
+        opacity: .85;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-group {
+        margin-bottom: 7px;
+        border: 1px solid #8885;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-group > summary {
+        padding: 9px 12px;
+        cursor: pointer;
+        background: #8882;
+        font-weight: bold;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-group-body {
+        padding: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-field {
+        box-sizing: border-box;
+        margin-bottom: 4px;
+        padding: 7px 9px;
+        border: 1px solid #8885;
+        border-radius: 3px;
+        background: #8881;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-field.selected {
+        background: rgba(92,184,92,.10);
+        border-color: rgba(92,184,92,.35);
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-field .form-group {
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-field .col-sm-6 {
+        float: none;
+        width: 100%;
+        padding: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-number .col-sm-6,
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-text .col-sm-6 {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-number label {
+        order: 2;
+        flex: 1;
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-number input[type="number"] {
+        order: 1;
+        flex: 0 0 84px;
+        width: 84px !important;
+        height: 28px !important;
+        padding: 3px 7px !important;
+        margin: 0 !important;
+        text-align: left;
+        box-sizing: border-box;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-text label {
+        order: 2;
+        flex: 1;
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-text input[type="text"] {
+        order: 1;
+        flex: 0 0 215px;
+        width: 215px !important;
+        max-width: 55%;
+        min-width: 0;
+        height: 28px !important;
+        padding: 3px 7px !important;
+        margin: 0 !important;
+        box-sizing: border-box;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-button {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        height: 28px;
+        padding: 2px 10px !important;
+        font-size: 13px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-rb-active-count {
+        font-size: 12px;
+        opacity: .8;
+      }
+    `;
+
+    document.head.append(style);
+  }
+
+  function settingField(body, key) {
+    const prefix = `nilspe_setting_${key}_`;
+
+    const control = Array.from(
+      body.querySelectorAll(
+        'input[id], select[id]'
+      )
+    ).find(node => node.id.startsWith(prefix));
+
+    if (!control) return null;
+
+    let container = control;
+
+    while (
+      container.parentElement &&
+      container.parentElement !== body
+    ) {
+      container = container.parentElement;
+    }
+
+    if (container.parentElement !== body) {
+      return null;
+    }
+
+    return { control, container };
+  }
+
+  function makeGroup(title, description) {
+    const details = el(
+      'details',
+      'nilspe-rb-group'
+    );
+
+    const summary = el('summary', '', title);
+
+    const content = el(
+      'div',
+      'nilspe-rb-group-body'
+    );
+
+    if (description) {
+      content.append(
+        el('p', 'nilspe-rb-info', description)
+      );
+    }
+
+    details.append(summary, content);
+
+    return { details, content };
+  }
+
+  /*
+   * ==========================================
+   * WACHENTYPEN
+   * ==========================================
+   */
+
+  function enhanceTypeFields(
+    content,
+    typeFields
+  ) {
+    const toolbar = el(
+      'div',
+      'nilspe-rb-toolbar'
+    );
+
+    const defaultsButton = el(
+      'button',
+      'btn btn-default btn-xs nilspe-rb-button',
+      'Standardnamen einsetzen'
+    );
+
+    const clearButton = el(
+      'button',
+      'btn btn-default btn-xs nilspe-rb-button',
+      'Alle Namen leeren'
+    );
+
+    defaultsButton.type = 'button';
+    clearButton.type = 'button';
+
+    const count = el(
+      'span',
+      'nilspe-rb-active-count'
+    );
+
+    function updateCount() {
+      let active = 0;
+
+      for (const type of BUILDING_TYPES) {
+        const field = typeFields.get(type.id);
+
+        if (!field) continue;
+
+        const hasName =
+          field.control.value.trim() !== '';
+
+        field.container.classList.toggle(
+          'selected',
+          hasName
+        );
+
+        if (hasName) active++;
+      }
+
+      count.textContent =
+        `${active} von ${BUILDING_TYPES.length} Wachentypen aktiv`;
+    }
+
+    function setTypeNames(useDefaults) {
+      for (const type of BUILDING_TYPES) {
+        const field = typeFields.get(type.id);
+        if (!field) continue;
+
+        field.control.value =
+          useDefaults ? type.defaultName : '';
+
+        field.control.dispatchEvent(
+          new Event('change', {
+            bubbles: true
+          })
+        );
+      }
+
+      updateCount();
+    }
+
+    defaultsButton.addEventListener(
+      'click',
+      () => {
+        if (!window.confirm(
+          'Alle bisher eingestellten Wachentyp-Namen ' +
+          'durch die Standardnamen ersetzen?'
+        )) return;
+
+        setTypeNames(true);
+      }
+    );
+
+    clearButton.addEventListener(
+      'click',
+      () => {
+        if (!window.confirm(
+          'Alle Wachentyp-Namen leeren?\n\n' +
+          'Damit werden bei der nächsten Umbenennung ' +
+          'keine Wachentypen berücksichtigt.'
+        )) return;
+
+        setTypeNames(false);
+      }
+    );
+
+    for (const field of typeFields.values()) {
+      field.control.addEventListener(
+        'input',
+        updateCount
+      );
+
+      field.control.addEventListener(
+        'change',
+        updateCount
+      );
+    }
+
+    toolbar.append(
+      defaultsButton,
+      clearButton,
+      count
+    );
+
+    content.prepend(toolbar);
+    updateCount();
+  }
+
+  /*
+   * ==========================================
+   * EINSTELLUNGEN GRUPPIEREN
+   * ==========================================
+   */
+
+  function groupRenderedSettings() {
+    const body = document.getElementById(
+      SETTINGS_IDENTIFIER
+    )?.querySelector('.settings-tab-body');
+
+    if (!body) return false;
+
+    if (body.querySelector('.nilspe-rb-root')) {
+      return true;
+    }
+
+    const fields = new Map();
+
+    for (const definition of SETTINGS) {
+      if (!definition.key) continue;
+
+      const field = settingField(
+        body,
+        definition.key
+      );
+
+      if (!field) return false;
+
+      fields.set(definition.key, field);
+    }
+
+    injectSettingsStyles();
+
+    const root = el(
+      'section',
+      'nilspe-rb-root'
+    );
+
+    root.append(
+      el('h2', '', 'Rename Buildings'),
+      el(
+        'p',
+        'nilspe-rb-info',
+        'Gebäudenamen und Nummerierung konfigurieren. ' +
+        'Vor der Umbenennung kannst du alle Änderungen ' +
+        'in einer Vorschau überprüfen.'
+      )
+    );
+
+    const naming = makeGroup(
+      'Benennung',
+      'Startnummer, Ziffernanzahl und Namenssuffix ' +
+      'gelten für alle aktivierten Wachentypen.'
+    );
+
+    const types = makeGroup(
+      'Wachentypen',
+      'Ein leerer Name bedeutet, dass dieser Gebäudetyp ' +
+      'nicht umbenannt wird.'
+    );
+
+    const flow = makeGroup(
+      'Ablauf',
+      'Anzahl paralleler Umbenennungen und Anfragepause.'
+    );
+
+    const assignments = [
+      {
+        group: naming,
+        keys: [
+          KEYS.startNumber,
+          KEYS.digits,
+          KEYS.suffix
+        ]
+      },
+      {
+        group: types,
+        keys: BUILDING_TYPES.map(
+          type => type.key
+        )
+      },
+      {
+        group: flow,
+        keys: [
+          KEYS.concurrency,
+          KEYS.requestDelay
+        ]
+      }
+    ];
+
+    const typeFields = new Map();
+
+    for (const assignment of assignments) {
+      for (const key of assignment.keys) {
+        const field = fields.get(key);
+
+        field.container.classList.add(
+          'nilspe-rb-field'
+        );
+
+        if (field.control.type === 'number') {
+          field.container.classList.add(
+            'nilspe-rb-number',
+            'selected'
+          );
+        } else {
+          field.container.classList.add(
+            'nilspe-rb-text'
+          );
+        }
+
+        assignment.group.content.append(
+          field.container
+        );
+      }
+    }
+
+    for (const type of BUILDING_TYPES) {
+      typeFields.set(
+        type.id,
+        fields.get(type.key)
+      );
+    }
+
+    enhanceTypeFields(
+      types.content,
+      typeFields
+    );
+
+    root.append(
+      naming.details,
+      types.details,
+      flow.details
+    );
+
+    for (const child of [...body.children]) {
+      if (
+        /^H[1-6]$/.test(child.tagName) &&
+        [
+          'Benamung',
+          'Benennung',
+          'Wachentypen',
+          'Ablauf'
+        ].includes(child.textContent.trim())
+      ) {
+        child.remove();
+      }
+    }
+
+    body.prepend(root);
+
+    console.log(
+      PREFIX,
+      `Einstellungen v${VERSION} geladen`
+    );
+
+    return true;
+  }
+
   async function createSettings() {
     if (typeof addOptions !== 'function') {
+      console.error(
+        PREFIX,
+        'NilsPe-Skriptbasis fehlt.'
+      );
       return;
     }
 
     await initializeDefaults();
 
-    const settings = [
-      {
-        type: 'header',
-        text: 'Benamung'
-      },
-      {
-        type: 'number',
-        key: KEYS.startNumber,
-        label: 'Startnummer',
-        info: 'Erste Nummer je Gebaeudetyp.',
-        min: 0,
-        max: 999999,
-        default: 1
-      },
-      {
-        type: 'number',
-        key: KEYS.digits,
-        label: 'Nummerierung',
-        info: 'Anzahl Stellen. Beispiel: 3 = 001, 002, 003 ...',
-        min: 1,
-        max: 10,
-        default: 3
-      },
-      {
-        type: 'text',
-        key: KEYS.suffix,
-        label: 'Namens-Suffix',
-        info: 'Zum Beispiel Berlin, NRW, Koeln oder Madrid.',
-        default: ''
-      },
-
-      {
-        type: 'header',
-        text: 'Wachentypen'
-      }
-    ];
-
-    for (const type of BUILDING_TYPES) {
-      settings.push({
-        type: 'text',
-        key: type.key,
-        label: `${type.id} ${type.name}`,
-        info: 'Leer lassen, wenn dieser Gebaeudetyp nicht umbenannt werden soll.',
-        default: type.defaultName
-      });
-    }
-
-    settings.push(
-      {
-        type: 'header',
-        text: 'Ablauf'
-      },
-      {
-        type: 'number',
-        key: KEYS.concurrency,
-        label: 'Parallele Umbenennungen',
-        min: 1,
-        max: 5,
-        default: 3
-      },
-      {
-        type: 'number',
-        key: KEYS.requestDelay,
-        label: 'Pause je Worker [ms]',
-        min: 0,
-        max: 5000,
-        default: 150
-      }
-    );
-
     await addOptions({
       identifier: SETTINGS_IDENTIFIER,
       title: 'Rename Buildings',
-      settings
+      settings: SETTINGS
     });
+
+    const body = document.getElementById(
+      SETTINGS_IDENTIFIER
+    )?.querySelector('.settings-tab-body');
+
+    if (!body) {
+      console.error(
+        PREFIX,
+        'Einstellungscontainer fehlt.'
+      );
+      return;
+    }
+
+    let scheduled = false;
+
+    new MutationObserver(() => {
+      if (scheduled) return;
+
+      scheduled = true;
+
+      queueMicrotask(() => {
+        scheduled = false;
+
+        try {
+          groupRenderedSettings();
+        } catch (error) {
+          console.error(
+            PREFIX,
+            'Einstellungen konnten nicht gruppiert werden:',
+            error
+          );
+        }
+      });
+    }).observe(body, {
+      childList: true
+    });
+
+    groupRenderedSettings();
   }
 
-  // ============================================================
-  // Konfiguration
-  // ============================================================
+  /*
+   * ==========================================
+   * KONFIGURATION
+   * ==========================================
+   */
 
   async function configuration() {
-    const startNumber = Math.max(
-      0,
-      Number(await GM.getValue(KEYS.startNumber, 1)) || 0
+    const startNumber = clampInteger(
+      await GM.getValue(
+        KEYS.startNumber,
+        1
+      ),
+      1, 0, 999999
     );
 
-    const digits = Math.max(
-      1,
-      Math.min(
-        10,
-        Number(await GM.getValue(KEYS.digits, 3)) || 3
-      )
+    const digits = clampInteger(
+      await GM.getValue(
+        KEYS.digits,
+        3
+      ),
+      3, 1, 10
     );
 
     const suffix = String(
-      await GM.getValue(KEYS.suffix, '')
+      await GM.getValue(
+        KEYS.suffix,
+        ''
+      )
     ).trim();
 
-    const concurrency = Math.max(
-      1,
-      Math.min(
-        5,
-        Number(await GM.getValue(KEYS.concurrency, 3)) || 3
-      )
+    const concurrency = clampInteger(
+      await GM.getValue(
+        KEYS.concurrency,
+        3
+      ),
+      3, 1, 5
     );
 
-    const requestDelay = Math.max(
-      0,
-      Number(await GM.getValue(KEYS.requestDelay, 150)) || 0
+    const requestDelay = clampInteger(
+      await GM.getValue(
+        KEYS.requestDelay,
+        150
+      ),
+      150, 0, 5000
     );
 
     const typeNames = new Map();
 
     for (const type of BUILDING_TYPES) {
       const name = String(
-        await GM.getValue(type.key, type.defaultName)
+        await GM.getValue(
+          type.key,
+          type.defaultName
+        )
       ).trim();
 
       if (name) {
@@ -238,9 +814,11 @@
     };
   }
 
-  // ============================================================
-  // Gebaeude
-  // ============================================================
+  /*
+   * ==========================================
+   * GEBÄUDE LADEN
+   * ==========================================
+   */
 
   function normalizeBuilding(building) {
     const dispatchCenterId =
@@ -252,7 +830,9 @@
     return {
       ...building,
       id: Number(building.id),
-      building_type: Number(building.building_type),
+      building_type: Number(
+        building.building_type
+      ),
       leitstelle_building_id:
         dispatchCenterId == null
           ? null
@@ -260,16 +840,19 @@
       caption:
         building.caption ||
         building.name ||
-        `Gebaeude ${building.id}`
+        `Gebäude ${building.id}`
     };
   }
 
   async function loadBuildings(dispatchCenterId) {
     if (
       typeof openDb !== 'function' ||
-      typeof updateBuildings !== 'function'
+      typeof updateBuildings !== 'function' ||
+      typeof getDataByIndex !== 'function'
     ) {
-      throw new Error('NilsPe-Skriptbasis wurde nicht geladen.');
+      throw new Error(
+        'NilsPe-Skriptbasis wurde nicht geladen.'
+      );
     }
 
     const db = await openDb();
@@ -286,6 +869,12 @@
         )
       )
         .map(normalizeBuilding)
+        .filter(building =>
+          Number.isSafeInteger(building.id) &&
+          building.id > 0 &&
+          building.leitstelle_building_id ===
+            dispatchCenterId
+        )
         .sort((a, b) =>
           a.building_type - b.building_type ||
           a.id - b.id
@@ -295,54 +884,80 @@
     }
   }
 
-  // ============================================================
-  // Neue Namen berechnen
-  // ============================================================
+  /*
+   * ==========================================
+   * NAMEN BERECHNEN
+   * ==========================================
+   */
 
   function formatNumber(number, digits) {
-    return String(number).padStart(digits, '0');
+    return String(number).padStart(
+      digits,
+      '0'
+    );
   }
 
-  function buildName(typeName, suffix, number, digits) {
+  function buildName(
+    typeName,
+    suffix,
+    number,
+    digits
+  ) {
     return [
       typeName,
       suffix,
       formatNumber(number, digits)
     ]
-      .filter(part => String(part).trim() !== '')
+      .filter(part =>
+        String(part).trim() !== ''
+      )
       .join(' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
-  function createRenamePlan(buildings, config) {
+  function createRenamePlan(
+    buildings,
+    config
+  ) {
     const groups = new Map();
 
-    // Nur konfigurierte Gebaeudetypen aufnehmen
     for (const building of buildings) {
-      if (!config.typeNames.has(building.building_type)) {
+      if (
+        !config.typeNames.has(
+          building.building_type
+        )
+      ) {
         continue;
       }
 
-      if (!groups.has(building.building_type)) {
-        groups.set(building.building_type, []);
+      if (
+        !groups.has(
+          building.building_type
+        )
+      ) {
+        groups.set(
+          building.building_type,
+          []
+        );
       }
 
-      groups.get(building.building_type).push(building);
+      groups.get(
+        building.building_type
+      ).push(building);
     }
 
     const plan = [];
 
     for (const [buildingType, group] of groups) {
-      // Wichtig:
-      // Innerhalb jedes Typs entscheidet ausschliesslich die Building-ID
-      // ueber die Reihenfolge.
       group.sort((a, b) => a.id - b.id);
 
-      const typeName = config.typeNames.get(buildingType);
+      const typeName =
+        config.typeNames.get(buildingType);
 
       group.forEach((building, index) => {
-        const number = config.startNumber + index;
+        const number =
+          config.startNumber + index;
 
         const newName = buildName(
           typeName,
@@ -371,13 +986,17 @@
     );
   }
 
-  // ============================================================
-  // CSRF / Request
-  // ============================================================
+  /*
+   * ==========================================
+   * GEBÄUDE UMBENENNEN
+   * ==========================================
+   */
 
   function csrfToken() {
     return (
-      document.querySelector('meta[name="csrf-token"]')?.content ??
+      document.querySelector(
+        'meta[name="csrf-token"]'
+      )?.content ??
       document.querySelector(
         'input[name="authenticity_token"]'
       )?.value ??
@@ -385,43 +1004,40 @@
     );
   }
 
-  async function renameBuilding(buildingId, newName) {
+  async function renameBuilding(
+    buildingId,
+    newName
+  ) {
     const token = csrfToken();
 
     if (!token) {
-      throw new Error('CSRF-Token wurde nicht gefunden.');
+      throw new Error(
+        'CSRF-Token wurde nicht gefunden.'
+      );
     }
 
-    const response = await fetch(`/buildings/${buildingId}`, {
-      method: 'POST',
-      credentials: 'same-origin',
+    const response = await fetch(
+      `/buildings/${buildingId}`,
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type':
+            'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-CSRF-Token': token,
+          'X-Requested-With': 'XMLHttpRequest',
+          Accept: 'text/html'
+        },
+        body: new URLSearchParams({
+          _method: 'patch',
+          authenticity_token: token,
+          'building[name]': newName,
+          commit: 'Speichern'
+        }),
+        redirect: 'manual'
+      }
+    );
 
-      headers: {
-        'Content-Type':
-          'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-CSRF-Token': token,
-        'X-Requested-With': 'XMLHttpRequest',
-        Accept: 'text/html'
-      },
-
-      body: new URLSearchParams({
-        _method: 'patch',
-        authenticity_token: token,
-        'building[name]': newName,
-        commit: 'Speichern'
-      }),
-
-      // Das Spiel antwortet nach erfolgreichem Speichern mit 302.
-      // Wir wollen nicht fuer jede Wache noch die Zielseite laden.
-      redirect: 'manual'
-    });
-
-    /*
-     * Bei redirect:'manual' liefert Fetch fuer den 302-Redirect
-     * normalerweise eine opaqueredirect-Response mit Status 0.
-     *
-     * HTTP-Fehler wie 422/500 bleiben dagegen erkennbar.
-     */
     if (
       response.type !== 'opaqueredirect' &&
       response.status !== 0 &&
@@ -434,9 +1050,11 @@
     }
   }
 
-  // ============================================================
-  // Cache nach dem Lauf aktualisieren
-  // ============================================================
+  /*
+   * ==========================================
+   * CACHE AKTUALISIEREN
+   * ==========================================
+   */
 
   async function refreshBuildingCache() {
     if (
@@ -449,29 +1067,28 @@
     const db = await openDb();
 
     try {
-      // maxAge 0 erzwingt eine Aktualisierung.
-      // Durch den V2-Inkrementalsync sollten nur geaenderte
-      // Gebaeude nachgeladen werden.
       await updateBuildings(db, 0);
     } finally {
       db.close();
     }
   }
 
-  // ============================================================
-  // Fortschrittsanzeige
-  // ============================================================
+  /*
+   * ==========================================
+   * FORTSCHRITT UND VORSCHAU
+   * ==========================================
+   */
 
-  function ensureProgress() {
+  function ensureStyles() {
     if (
       document.getElementById(
-        'nilspe-rename-building-progress'
+        'nilspe-rename-building-style'
       )
     ) {
       return;
     }
 
-    const style = document.createElement('style');
+    const style = el('style');
     style.id = 'nilspe-rename-building-style';
 
     style.textContent = `
@@ -503,14 +1120,14 @@
       }
 
       #nilspe-rename-building-success {
-        width: 0;
         height: 100%;
+        width: 0;
         background: #5cb85c;
       }
 
       #nilspe-rename-building-errors {
-        width: 0;
         height: 100%;
+        width: 0;
         background: #d9534f;
       }
 
@@ -521,14 +1138,11 @@
         border-color: #444;
       }
 
-
-      /* Vorschau */
-
       #nilspe-rename-preview-backdrop {
         position: fixed;
         inset: 0;
         z-index: 2147483001;
-        background: rgba(0, 0, 0, .55);
+        background: rgba(0,0,0,.55);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -540,11 +1154,11 @@
         max-height: 90vh;
         display: flex;
         flex-direction: column;
+        overflow: hidden;
         background: #fff;
         color: #333;
         border-radius: 6px;
-        box-shadow: 0 8px 30px rgba(0, 0, 0, .35);
-        overflow: hidden;
+        box-shadow: 0 8px 30px rgba(0,0,0,.35);
       }
 
       #nilspe-rename-preview-header {
@@ -618,48 +1232,76 @@
     `;
 
     document.head.append(style);
+  }
 
-    const container = document.createElement('div');
-    container.id = 'nilspe-rename-building-progress';
+  function ensureProgress() {
+    if (
+      document.getElementById(
+        'nilspe-rename-building-progress'
+      )
+    ) {
+      return;
+    }
 
-    const row = document.createElement('div');
-    row.id = 'nilspe-rename-building-progress-row';
+    ensureStyles();
 
-    const cancel = document.createElement('button');
+    const container = el('div');
+    container.id =
+      'nilspe-rename-building-progress';
+
+    const row = el('div');
+    row.id =
+      'nilspe-rename-building-progress-row';
+
+    const cancel = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Abbrechen'
+    );
+
     cancel.type = 'button';
-    cancel.className = 'btn btn-default btn-xs';
-    cancel.textContent = 'Abbrechen';
+    cancel.id = 'nilspe-rename-building-cancel';
 
     cancel.addEventListener('click', () => {
-      running = false;
+      if (!running) return;
 
-      setProgress(
-        'Abgebrochen',
-        0,
-        0,
-        0,
-        'danger'
+      cancelRequested = true;
+      cancel.disabled = true;
+
+      const status = document.getElementById(
+        'nilspe-rename-building-status'
       );
+
+      if (status) {
+        status.className = 'label label-warning';
+        status.textContent =
+          'Abbruch angefordert – laufende Anfragen werden beendet ...';
+      }
     });
 
-    const status = document.createElement('span');
-    status.id = 'nilspe-rename-building-status';
-    status.className = 'label label-info';
-    status.textContent = 'Bereit';
+    const status = el(
+      'span',
+      'label label-info',
+      'Bereit'
+    );
 
-    const track = document.createElement('div');
+    status.id =
+      'nilspe-rename-building-status';
+
+    const track = el('div');
     track.id = 'nilspe-rename-building-track';
 
-    const success = document.createElement('div');
-    success.id = 'nilspe-rename-building-success';
+    const success = el('div');
+    success.id =
+      'nilspe-rename-building-success';
 
-    const errors = document.createElement('div');
-    errors.id = 'nilspe-rename-building-errors';
+    const errors = el('div');
+    errors.id =
+      'nilspe-rename-building-errors';
 
     track.append(success, errors);
     row.append(cancel, status);
     container.append(row, track);
-
     document.body.append(container);
   }
 
@@ -690,65 +1332,78 @@
     status.textContent = message;
 
     success.style.width =
-      `${Math.max(0, completed - errors) / safeTotal * 100}%`;
+      `${Math.max(0, completed - errors) /
+        safeTotal * 100}%`;
 
     errorBar.style.width =
       `${errors / safeTotal * 100}%`;
   }
 
-  // ============================================================
-  // Auswahl / Plan
-  // ============================================================
-
   function currentDispatchCenterId() {
-    return Number(
-      location.pathname.match(/^\/buildings\/(\d+)/)?.[1]
+    const heading = document.querySelector(
+      'h1[building_type]'
     );
-  }
-
-  async function selection() {
-    const dispatchCenterId = currentDispatchCenterId();
 
     if (
-      !Number.isInteger(dispatchCenterId) ||
-      dispatchCenterId <= 0
+      Number(
+        heading?.getAttribute('building_type')
+      ) !== 7
     ) {
+      throw new Error(
+        'Umbenennung nur von einer Leitstelle aus möglich.'
+      );
+    }
+
+    const id = Number(
+      location.pathname.match(
+        /^\/buildings\/(\d+)/
+      )?.[1]
+    );
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
       throw new Error(
         'Leitstellen-ID konnte nicht ermittelt werden.'
       );
     }
 
+    return id;
+  }
+
+  async function selection() {
+    const dispatchCenterId =
+      currentDispatchCenterId();
+
     const config = await configuration();
 
-    if (config.typeNames.size === 0) {
+    if (!config.typeNames.size) {
       throw new Error(
-        'Kein Wachentyp fuer die Umbenennung konfiguriert.'
+        'Kein Gebäudetyp für die Umbenennung konfiguriert.'
       );
     }
 
     setProgress(
-      'Gebaeude werden aus dem API-Cache geladen ...'
+      'Gebäude werden aus dem API-Cache geladen ...'
     );
 
     const buildings = await loadBuildings(
       dispatchCenterId
     );
 
-    const plan = createRenamePlan(
-      buildings,
-      config
-    );
-
     return {
       config,
       buildings,
-      plan
+      plan: createRenamePlan(
+        buildings,
+        config
+      )
     };
   }
 
-  // ============================================================
-  // Vorschau
-  // ============================================================
+  /*
+   * ==========================================
+   * UMBENENNVORSCHAU
+   * ==========================================
+   */
 
   function closePreview() {
     document.getElementById(
@@ -768,7 +1423,10 @@
         });
       }
 
-      const entry = summary.get(item.buildingType);
+      const entry = summary.get(
+        item.buildingType
+      );
+
       entry.total++;
 
       if (item.changed) {
@@ -781,83 +1439,100 @@
 
   function showPreview(plan, config) {
     closePreview();
-    ensureProgress();
+    ensureStyles();
 
-    const changed = plan.filter(item => item.changed);
-    const unchanged = plan.length - changed.length;
+    const changed = plan.filter(
+      item => item.changed
+    );
 
-    const backdrop = document.createElement('div');
-    backdrop.id = 'nilspe-rename-preview-backdrop';
+    const unchanged =
+      plan.length - changed.length;
 
-    const modal = document.createElement('div');
+    const backdrop = el('div');
+    backdrop.id =
+      'nilspe-rename-preview-backdrop';
+
+    const modal = el('div');
     modal.id = 'nilspe-rename-preview';
 
-    // Header
-    const header = document.createElement('div');
-    header.id = 'nilspe-rename-preview-header';
+    const header = el('div');
+    header.id =
+      'nilspe-rename-preview-header';
 
-    const title = document.createElement('h3');
-    title.textContent = 'Umbenennvorschau';
+    const title = el(
+      'h3',
+      '',
+      'Umbenennvorschau'
+    );
 
-    const close = document.createElement('button');
+    const close = el(
+      'button',
+      'btn btn-default btn-sm',
+      'Schließen'
+    );
+
     close.type = 'button';
-    close.className = 'btn btn-default btn-sm';
-    close.textContent = 'Schliessen';
-    close.addEventListener('click', closePreview);
+    close.addEventListener(
+      'click',
+      closePreview
+    );
 
     header.append(title, close);
 
-    // Summary
-    const summary = document.createElement('div');
-    summary.id = 'nilspe-rename-preview-summary';
+    const summary = el('div');
+    summary.id =
+      'nilspe-rename-preview-summary';
 
-    const headline = document.createElement('div');
+    const headline = el('div');
 
     headline.innerHTML =
-      `<strong>${plan.length.toLocaleString('de-DE')}</strong> ` +
-      `Gebaeude beruecksichtigt &nbsp; | &nbsp; ` +
-      `<strong>${changed.length.toLocaleString('de-DE')}</strong> ` +
-      `werden geaendert &nbsp; | &nbsp; ` +
-      `<strong>${unchanged.toLocaleString('de-DE')}</strong> ` +
+      `<strong>${formatCount(plan.length)}</strong> ` +
+      `Gebäude berücksichtigt &nbsp; | &nbsp; ` +
+      `<strong>${formatCount(changed.length)}</strong> ` +
+      `werden geändert &nbsp; | &nbsp; ` +
+      `<strong>${formatCount(unchanged)}</strong> ` +
       `sind bereits korrekt`;
 
     summary.append(headline);
 
-    const configLine = document.createElement('div');
-    configLine.style.marginTop = '6px';
-
-    configLine.textContent =
+    const configLine = el(
+      'div',
+      '',
       `Suffix: "${config.suffix}" | ` +
       `Start: ${config.startNumber} | ` +
-      `Nummerierung: ${config.digits}`;
+      `Nummerierung: ${config.digits}`
+    );
 
+    configLine.style.marginTop = '6px';
     summary.append(configLine);
 
     const perType = summaryByType(plan);
 
     if (perType.length) {
-      const typeLine = document.createElement('div');
+      const typeLine = el(
+        'div',
+        '',
+        perType.map(entry =>
+          `${entry.typeLabel}: ` +
+          `${entry.changed}/${entry.total}`
+        ).join(' | ')
+      );
+
       typeLine.style.marginTop = '8px';
-
-      typeLine.textContent = perType
-        .map(entry =>
-          `${entry.typeLabel}: ${entry.changed}/${entry.total}`
-        )
-        .join(' | ');
-
       summary.append(typeLine);
     }
 
-    // Tabelle
-    const wrapper = document.createElement('div');
-    wrapper.id = 'nilspe-rename-preview-table-wrapper';
+    const wrapper = el('div');
+    wrapper.id =
+      'nilspe-rename-preview-table-wrapper';
 
-    const table = document.createElement('table');
-    table.className =
-      'table table-striped table-condensed table-hover';
+    const table = el(
+      'table',
+      'table table-striped table-condensed table-hover'
+    );
 
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
+    const thead = el('thead');
+    const headerRow = el('tr');
 
     for (const text of [
       'Building-ID',
@@ -865,37 +1540,46 @@
       'Alter Name',
       'Neuer Name'
     ]) {
-      const th = document.createElement('th');
-      th.textContent = text;
-      headerRow.append(th);
+      headerRow.append(
+        el('th', '', text)
+      );
     }
 
     thead.append(headerRow);
 
-    const tbody = document.createElement('tbody');
+    const tbody = el('tbody');
 
-    /*
-     * Damit auch bei vielen tausend Gebaeuden die Vorschau
-     * fluessig bleibt, zeigen wir maximal 2000 geaenderte Namen.
-     * Die komplette Umbenennung ist davon nicht betroffen.
-     */
-    const previewItems = changed.slice(0, 2000);
+    const previewItems = changed.slice(
+      0,
+      2000
+    );
 
     for (const item of previewItems) {
-      const row = document.createElement('tr');
+      const row = el('tr');
 
-      const id = document.createElement('td');
-      id.textContent = item.id;
+      const id = el(
+        'td',
+        '',
+        String(item.id)
+      );
 
-      const type = document.createElement('td');
-      type.textContent = item.typeLabel;
+      const type = el(
+        'td',
+        '',
+        item.typeLabel
+      );
 
-      const oldName = document.createElement('td');
-      oldName.textContent = item.oldName;
+      const oldName = el(
+        'td',
+        '',
+        item.oldName
+      );
 
-      const newName = document.createElement('td');
-      newName.className = 'nilspe-rename-changed';
-      newName.textContent = item.newName;
+      const newName = el(
+        'td',
+        'nilspe-rename-changed',
+        item.newName
+      );
 
       row.append(
         id,
@@ -910,27 +1594,38 @@
     table.append(thead, tbody);
     wrapper.append(table);
 
-    if (changed.length > previewItems.length) {
-      const note = document.createElement('div');
-      note.className = 'alert alert-info';
-      note.style.margin = '10px';
+    if (
+      changed.length >
+      previewItems.length
+    ) {
+      const note = el(
+        'div',
+        'alert alert-info',
+        `Vorschau auf ${formatCount(previewItems.length)} ` +
+        `von ${formatCount(changed.length)} Änderungen begrenzt.`
+      );
 
-      note.textContent =
-        `Vorschau auf ${previewItems.length.toLocaleString('de-DE')} ` +
-        `von ${changed.length.toLocaleString('de-DE')} Aenderungen begrenzt.`;
+      note.style.margin = '10px';
 
       wrapper.append(note);
     }
 
-    // Footer
-    const footer = document.createElement('div');
-    footer.id = 'nilspe-rename-preview-footer';
+    const footer = el('div');
+    footer.id =
+      'nilspe-rename-preview-footer';
 
-    const closeBottom = document.createElement('button');
+    const closeBottom = el(
+      'button',
+      'btn btn-default',
+      'Schließen'
+    );
+
     closeBottom.type = 'button';
-    closeBottom.className = 'btn btn-default';
-    closeBottom.textContent = 'Schliessen';
-    closeBottom.addEventListener('click', closePreview);
+
+    closeBottom.addEventListener(
+      'click',
+      closePreview
+    );
 
     footer.append(closeBottom);
 
@@ -943,16 +1638,23 @@
 
     backdrop.append(modal);
 
-    backdrop.addEventListener('click', event => {
-      if (event.target === backdrop) {
-        closePreview();
+    backdrop.addEventListener(
+      'click',
+      event => {
+        if (event.target === backdrop) {
+          closePreview();
+        }
       }
-    });
+    );
 
     document.body.append(backdrop);
   }
 
   async function preview() {
+    if (running || busy) return;
+
+    busy = true;
+
     try {
       const {
         config,
@@ -961,40 +1663,44 @@
 
       showPreview(plan, config);
 
-      const changed =
-        plan.filter(item => item.changed).length;
+      const changed = plan.filter(
+        item => item.changed
+      ).length;
 
       setProgress(
-        `Vorschau: ${changed.toLocaleString('de-DE')} Namen werden geaendert`,
-        0,
-        0,
-        0,
+        `Vorschau: ${formatCount(changed)} Namen werden geändert`,
+        0, 0, 0,
         changed ? 'warning' : 'success'
       );
     } catch (error) {
       console.error(
-        '[Rename Buildings] Vorschau fehlgeschlagen:',
+        PREFIX,
+        'Vorschau fehlgeschlagen:',
         error
       );
 
       setProgress(
         `Fehler: ${error.message ?? error}`,
-        0,
-        0,
-        0,
+        0, 0, 0,
         'danger'
       );
+    } finally {
+      busy = false;
     }
   }
 
-  // ============================================================
-  // Umbenennung
-  // ============================================================
+  /*
+   * ==========================================
+   * UMBENENNDURCHLAUF
+   * ==========================================
+   */
 
   async function run(buttons) {
-    if (running) {
+    if (running || busy) {
       return;
     }
+
+    busy = true;
 
     try {
       const {
@@ -1002,33 +1708,21 @@
         plan
       } = await selection();
 
-      /*
-       * Wichtig:
-       * Die Nummern wurden bereits anhand ALLER Gebaeude des
-       * jeweiligen Typs berechnet.
-       *
-       * Erst DANACH filtern wir auf geaenderte Namen.
-       *
-       * Dadurch bleibt die Nummerierung bei einem erneuten Lauf
-       * immer identisch.
-       */
       const changes = plan.filter(
         item => item.changed
       );
 
-      if (changes.length === 0) {
+      if (!changes.length) {
         setProgress(
-          'Alle Gebaeudenamen sind bereits korrekt',
-          0,
-          0,
-          0,
-          'success'
+          'Alle Gebäudenamen sind bereits korrekt',
+          0, 0, 0, 'success'
         );
         return;
       }
 
-      const confirmed = globalThis.confirm(
-        `${changes.length.toLocaleString('de-DE')} Gebaeude werden umbenannt.\n\n` +
+      const confirmed = window.confirm(
+        `${formatCount(changes.length)} Gebäude ` +
+        `werden umbenannt.\n\n` +
         `Namens-Suffix: ${config.suffix || '(leer)'}\n` +
         `Startnummer: ${config.startNumber}\n` +
         `Nummerierung: ${config.digits}\n\n` +
@@ -1038,19 +1732,27 @@
       if (!confirmed) {
         setProgress(
           'Umbenennung nicht gestartet',
-          0,
-          0,
-          0,
-          'warning'
+          0, 0, 0, 'warning'
         );
         return;
       }
 
       running = true;
+      cancelRequested = false;
 
-      buttons.forEach(button => {
+      for (const button of buttons) {
         button.disabled = true;
-      });
+      }
+
+      ensureProgress();
+
+      const cancelButton = document.getElementById(
+        'nilspe-rename-building-cancel'
+      );
+
+      if (cancelButton) {
+        cancelButton.disabled = false;
+      }
 
       let nextIndex = 0;
       let completed = 0;
@@ -1058,7 +1760,7 @@
       let renamed = 0;
 
       async function worker() {
-        while (running) {
+        while (!cancelRequested) {
           const index = nextIndex++;
 
           if (index >= changes.length) {
@@ -1081,11 +1783,13 @@
             );
 
             renamed++;
+
           } catch (error) {
             errors++;
 
             console.error(
-              '[Rename Buildings] Gebaeude fehlgeschlagen:',
+              PREFIX,
+              'Gebäude fehlgeschlagen:',
               {
                 id: item.id,
                 oldName: item.oldName,
@@ -1103,11 +1807,11 @@
             completed,
             errors,
             changes.length,
-            errors ? 'warning' : 'success'
+            errors ? 'warning' : 'info'
           );
 
           if (
-            running &&
+            !cancelRequested &&
             config.requestDelay > 0
           ) {
             await sleep(config.requestDelay);
@@ -1123,71 +1827,93 @@
               changes.length
             )
           },
-          worker
+          () => worker()
         )
       );
 
-      if (!running) {
-        return;
+      if (renamed > 0) {
+        setProgress(
+          'Gebäude-Cache wird aktualisiert ...',
+          completed,
+          errors,
+          changes.length,
+          'info'
+        );
+
+        try {
+          await refreshBuildingCache();
+        } catch (error) {
+          console.warn(
+            PREFIX,
+            'Cache konnte nicht aktualisiert werden:',
+            error
+          );
+        }
       }
 
-      setProgress(
-        'Gebaeude-Cache wird aktualisiert ...',
-        completed,
-        errors,
-        changes.length,
-        'info'
-      );
-
-      try {
-        await refreshBuildingCache();
-      } catch (error) {
-        console.warn(
-          '[Rename Buildings] Cache konnte nicht aktualisiert werden:',
-          error
+      if (cancelRequested) {
+        setProgress(
+          `Abgebrochen: ${formatCount(renamed)} umbenannt, ` +
+          `${formatCount(errors)} Fehler, ` +
+          `${formatCount(changes.length - completed)} offen`,
+          completed,
+          errors,
+          changes.length,
+          'warning'
+        );
+      } else {
+        setProgress(
+          `Fertig: ${formatCount(renamed)} umbenannt, ` +
+          `${formatCount(errors)} Fehler`,
+          completed,
+          errors,
+          changes.length,
+          errors ? 'warning' : 'success'
         );
       }
 
-      setProgress(
-        `Fertig: ${renamed.toLocaleString('de-DE')} umbenannt, ` +
-        `${errors.toLocaleString('de-DE')} Fehler`,
-        completed,
-        errors,
-        changes.length,
-        errors ? 'warning' : 'success'
-      );
-
     } catch (error) {
       console.error(
-        '[Rename Buildings] Lauf fehlgeschlagen:',
+        PREFIX,
+        'Lauf fehlgeschlagen:',
         error
       );
 
       setProgress(
         `Fehler: ${error.message ?? error}`,
-        0,
-        0,
-        0,
+        0, 0, 0,
         'danger'
       );
     } finally {
       running = false;
+      busy = false;
+      cancelRequested = false;
 
-      buttons.forEach(button => {
+      for (const button of buttons) {
         button.disabled = false;
-      });
+      }
+
+      const cancelButton = document.getElementById(
+        'nilspe-rename-building-cancel'
+      );
+
+      if (cancelButton) {
+        cancelButton.disabled = true;
+      }
     }
   }
 
-  // ============================================================
-  // Buttons
-  // ============================================================
+  /*
+   * ==========================================
+   * BUTTONS
+   * ==========================================
+   */
 
   function settingsButton() {
-    const button = document.createElement('a');
-
-    button.className =
-      'btn btn-default btn-xs';
+    const button = el(
+      'a',
+      'btn btn-default btn-xs'
+    );
 
     button.href =
       `/settings/index#${SETTINGS_IDENTIFIER}`;
@@ -1195,34 +1921,37 @@
     button.target = '_blank';
     button.title = 'Einstellungen';
 
-    const icon = document.createElement('span');
-    icon.className = 'glyphicon glyphicon-cog';
-
-    button.append(icon);
+    button.append(
+      el(
+        'span',
+        'glyphicon glyphicon-cog'
+      )
+    );
 
     return button;
   }
 
   function buildingTable() {
     return (
-      document.getElementById('building_table') ??
-      document.querySelector('#tab_buildings table')
+      document.getElementById(
+        'building_table'
+      ) ??
+      document.querySelector(
+        '#tab_buildings table'
+      )
     );
   }
 
   function addButtons() {
-    const heading =
-      document.querySelector('h1[building_type]');
+    const heading = document.querySelector(
+      'h1[building_type]'
+    );
 
-    /*
-     * Typ 7 = Leitstelle
-     *
-     * Der Renamer wird nur auf einer Leitstellenseite
-     * eingeblendet.
-     */
     if (
       Number(
-        heading?.getAttribute('building_type')
+        heading?.getAttribute(
+          'building_type'
+        )
       ) !== 7 ||
       document.getElementById(
         'nilspe-rename-building-buttons'
@@ -1233,50 +1962,46 @@
 
     const table = buildingTable();
 
-    if (!table) {
+    if (!table?.parentElement) {
       return;
     }
 
-    const group = document.createElement('div');
+    const group = el(
+      'div',
+      'btn-group'
+    );
 
     group.id =
       'nilspe-rename-building-buttons';
 
-    group.className = 'btn-group';
-
-    const previewButton =
-      document.createElement('button');
-
-    previewButton.type = 'button';
-    previewButton.className =
-      'btn btn-default btn-xs';
-
-    previewButton.textContent =
-      'Umbenennvorschau';
-
-    previewButton.addEventListener(
-      'click',
-      preview
+    const previewButton = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Umbenennvorschau'
     );
 
-    const renameButton =
-      document.createElement('button');
+    const renameButton = el(
+      'button',
+      'btn btn-primary btn-xs',
+      'Gebäude umbenennen'
+    );
 
+    previewButton.type = 'button';
     renameButton.type = 'button';
-    renameButton.className =
-      'btn btn-primary btn-xs';
-
-    renameButton.textContent =
-      'Gebaeude umbenennen';
 
     const buttons = [
       previewButton,
       renameButton
     ];
 
+    previewButton.addEventListener(
+      'click',
+      () => void preview()
+    );
+
     renameButton.addEventListener(
       'click',
-      () => run(buttons)
+      () => void run(buttons)
     );
 
     group.append(
@@ -1285,25 +2010,27 @@
       settingsButton()
     );
 
-    const row = document.createElement('div');
+    const row = el('div');
 
     row.id =
       'nilspe-rename-building-button-row';
 
-    row.style.display = 'block';
-    row.style.width = '100%';
+    row.style.cssText =
+      'display:block;width:100%;margin:0';
 
     row.append(group);
 
-    table.parentElement?.insertBefore(
+    table.parentElement.insertBefore(
       row,
       table
     );
   }
 
-  // ============================================================
-  // Start
-  // ============================================================
+  /*
+   * ==========================================
+   * INITIALISIERUNG
+   * ==========================================
+   */
 
   if (
     location.pathname.startsWith(
@@ -1314,9 +2041,7 @@
   } else {
     addButtons();
 
-    new MutationObserver(
-      addButtons
-    ).observe(
+    new MutationObserver(addButtons).observe(
       document.body,
       {
         childList: true,
@@ -1325,4 +2050,8 @@
     );
   }
 
+  console.log(
+    PREFIX,
+    `Version ${VERSION} geladen`
+  );
 })();
