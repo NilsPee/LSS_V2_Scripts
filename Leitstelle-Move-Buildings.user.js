@@ -1,7 +1,8 @@
+
 // ==UserScript==
 // @name         Leitstelle Move Buildings
 // @namespace    NilsPe.move.buildings
-// @version      2.0.0
+// @version      2.1.0
 // @description  Verschiebt Wachen einer Leitstelle anhand eines Namensfilters in eine andere Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -11,6 +12,8 @@
 // @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Move-Buildings.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
+// @match        https://leitstellenspiel.de/buildings/*
+// @match        https://leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        unsafeWindow
@@ -22,10 +25,8 @@
 (async function () {
   'use strict';
 
-  // ============================================================
-  // Einstellungen
-  // ============================================================
-
+  const VERSION = '2.1.0';
+  const PREFIX = '[Leitstelle Move Buildings]';
   const SETTINGS_IDENTIFIER = 'nilspe_move_buildings';
 
   const KEYS = {
@@ -38,97 +39,590 @@
   };
 
   let running = false;
-  let addingButtons = false;
+  let busy = false;
+  let cancelRequested = false;
 
-  // ============================================================
-  // Einstellungen
-  // ============================================================
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
+
+  function el(tag, className = '', text = '') {
+    const element = document.createElement(tag);
+
+    if (className) {
+      element.className = className;
+    }
+
+    if (text) {
+      element.textContent = text;
+    }
+
+    return element;
+  }
+
+  function formatCount(value) {
+    return Number(value).toLocaleString('de-DE');
+  }
+
+  function clampInteger(value, fallback, min, max) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      return fallback;
+    }
+
+    return Math.min(
+      max,
+      Math.max(min, Math.floor(number))
+    );
+  }
+
+  /*
+   * ==========================================
+   * EINSTELLUNGEN
+   * ==========================================
+   *
+   * Alle Speicherkeys aus v2.0.0
+   * bleiben unverändert.
+   */
+
+  const SETTINGS = [
+    {
+      type: 'header',
+      text: 'Verschieben'
+    },
+    {
+      type: 'select',
+      key: KEYS.targetDispatchCenter,
+      label: 'Ziel-Leitstelle',
+      title: 'Ziel-Leitstelle auswählen',
+      multiple: false,
+      selectType: 'dispatch_centers'
+    },
+    {
+      type: 'text',
+      key: KEYS.nameFilter,
+      label: 'Namensfilter',
+      info: 'Nur Wachen, deren Name diesen Text enthält.',
+      default: ''
+    },
+    {
+      type: 'header',
+      text: 'Ablauf'
+    },
+    {
+      type: 'number',
+      key: KEYS.concurrency,
+      label: 'Parallele Verschiebungen',
+      min: 1,
+      max: 5,
+      default: 3
+    },
+    {
+      type: 'number',
+      key: KEYS.requestDelay,
+      label: 'Pause zwischen Anfragen [ms]',
+      min: 0,
+      max: 5000,
+      default: 150
+    },
+    {
+      type: 'checkbox',
+      key: KEYS.requireConfirm,
+      label: 'Vor dem Verschieben Bestätigung anzeigen',
+      default: true
+    },
+    {
+      type: 'checkbox',
+      key: KEYS.dryRun,
+      label: 'Testlauf aktivieren',
+      default: false
+    }
+  ];
+
+  /*
+   * ==========================================
+   * EINHEITLICHE EINSTELLUNGSOBERFLÄCHE
+   * ==========================================
+   *
+   * Stil nach Delete Buildings:
+   * - normale h2-Überschrift
+   * - kurze Beschreibung
+   * - einklappbare Gruppen
+   * - einheitliche Eingabefelder
+   */
+
+  function injectSettingsStyles() {
+    if (document.getElementById(
+      'nilspe-mb-settings-style'
+    )) {
+      return;
+    }
+
+    const style = el('style');
+    style.id = 'nilspe-mb-settings-style';
+
+    style.textContent = `
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-settings-root {
+        margin-bottom: 24px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-info {
+        margin-bottom: 10px;
+        font-size: 12px;
+        opacity: .85;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-group {
+        margin-bottom: 7px;
+        border: 1px solid #8885;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-group > summary {
+        padding: 9px 12px;
+        background: #8882;
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-group-body {
+        padding: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-field {
+        box-sizing: border-box;
+        margin-bottom: 4px;
+        padding: 7px 9px;
+        border: 1px solid #8885;
+        border-radius: 3px;
+        background: #8881;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-field.selected {
+        background: rgba(92,184,92,.10);
+        border-color: rgba(92,184,92,.35);
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-field .form-group {
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-field .col-sm-6 {
+        float: none;
+        width: 100%;
+        padding: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-number .col-sm-6,
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-text .col-sm-6 {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-number label,
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-text label {
+        order: 2;
+        flex: 1;
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-number input[type="number"] {
+        order: 1;
+        flex: 0 0 84px;
+        width: 84px !important;
+        height: 28px !important;
+        margin: 0 !important;
+        padding: 3px 7px !important;
+        box-sizing: border-box;
+        text-align: left;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-text input[type="text"] {
+        order: 1;
+        flex: 0 0 215px;
+        width: 215px !important;
+        max-width: 55%;
+        min-width: 0;
+        height: 28px !important;
+        margin: 0 !important;
+        padding: 3px 7px !important;
+        box-sizing: border-box;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-select label {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-select .bootstrap-select {
+        max-width: 100%;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-select
+      .bootstrap-select > button {
+        min-height: 28px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-checkbox
+      .col-sm-6 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-checkbox
+      input[type="checkbox"] {
+        margin: 0 !important;
+        position: static !important;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-checkbox label {
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-mb-note {
+        padding: 8px 10px;
+        margin-top: 10px;
+        border: 1px solid #8885;
+        border-radius: 3px;
+        background: #8881;
+        font-size: 12px;
+      }
+    `;
+
+    document.head.append(style);
+  }
+
+  function settingField(body, key) {
+    const prefix = `nilspe_setting_${key}_`;
+
+    const control = Array.from(
+      body.querySelectorAll(
+        'input[id], select[id]'
+      )
+    ).find(node =>
+      node.id.startsWith(prefix)
+    );
+
+    if (!control) {
+      return null;
+    }
+
+    let container = control;
+
+    while (
+      container.parentElement &&
+      container.parentElement !== body
+    ) {
+      container = container.parentElement;
+    }
+
+    return container.parentElement === body
+      ? { control, container }
+      : null;
+  }
+
+  function makeGroup(title, description) {
+    const details = el(
+      'details',
+      'nilspe-mb-group'
+    );
+
+    const summary = el('summary', '', title);
+
+    const content = el(
+      'div',
+      'nilspe-mb-group-body'
+    );
+
+    if (description) {
+      content.append(
+        el('p', 'nilspe-mb-info', description)
+      );
+    }
+
+    details.append(summary, content);
+
+    return { details, content };
+  }
+
+  function decorateField(field) {
+    const { control, container } = field;
+
+    container.classList.add(
+      'nilspe-mb-field'
+    );
+
+    if (control.tagName === 'SELECT') {
+      container.classList.add(
+        'nilspe-mb-select'
+      );
+      return;
+    }
+
+    if (control.type === 'number') {
+      container.classList.add(
+        'nilspe-mb-number',
+        'selected'
+      );
+      return;
+    }
+
+    if (control.type === 'text') {
+      container.classList.add(
+        'nilspe-mb-text'
+      );
+
+      const update = () => {
+        container.classList.toggle(
+          'selected',
+          control.value.trim().length > 0
+        );
+      };
+
+      control.addEventListener('input', update);
+      control.addEventListener('change', update);
+      update();
+      return;
+    }
+
+    if (control.type === 'checkbox') {
+      container.classList.add(
+        'nilspe-mb-checkbox'
+      );
+
+      const update = () => {
+        container.classList.toggle(
+          'selected',
+          control.checked
+        );
+      };
+
+      control.addEventListener('change', update);
+      update();
+    }
+  }
+
+  function groupRenderedSettings() {
+    const body = document.getElementById(
+      SETTINGS_IDENTIFIER
+    )?.querySelector('.settings-tab-body');
+
+    if (!body) {
+      return false;
+    }
+
+    if (
+      body.querySelector(
+        '.nilspe-mb-settings-root'
+      )
+    ) {
+      return true;
+    }
+
+    const fields = new Map();
+
+    for (const definition of SETTINGS) {
+      if (!definition.key) continue;
+
+      const field = settingField(
+        body,
+        definition.key
+      );
+
+      if (!field) {
+        return false;
+      }
+
+      fields.set(definition.key, field);
+    }
+
+    injectSettingsStyles();
+
+    const root = el(
+      'section',
+      'nilspe-mb-settings-root'
+    );
+
+    root.append(
+      el('h2', '', 'Wachenverschieber'),
+      el(
+        'p',
+        'nilspe-mb-info',
+        'Wachen anhand ihres Namensfilters einer ' +
+        'anderen Leitstelle zuordnen. ' +
+        'Testlauf und Bestätigung können vorab ' +
+        'in den Einstellungen festgelegt werden.'
+      )
+    );
+
+    const moveGroup = makeGroup(
+      'Verschieben',
+      'Ziel-Leitstelle und Suchtext für die Wachen.'
+    );
+
+    const flowGroup = makeGroup(
+      'Ablauf',
+      'Verarbeitungsgeschwindigkeit und Sicherheitsoptionen.'
+    );
+
+    const assignments = [
+      {
+        group: moveGroup,
+        keys: [
+          KEYS.targetDispatchCenter,
+          KEYS.nameFilter
+        ]
+      },
+      {
+        group: flowGroup,
+        keys: [
+          KEYS.concurrency,
+          KEYS.requestDelay,
+          KEYS.requireConfirm,
+          KEYS.dryRun
+        ]
+      }
+    ];
+
+    for (const assignment of assignments) {
+      for (const key of assignment.keys) {
+        const field = fields.get(key);
+
+        decorateField(field);
+        assignment.group.content.append(
+          field.container
+        );
+      }
+    }
+
+    flowGroup.content.append(
+      el(
+        'div',
+        'nilspe-mb-note',
+        'Testlauf: Es werden keine Wachen verschoben. ' +
+        'Bei deaktiviertem Testlauf führt der Button ' +
+        'die tatsächliche Verschiebung aus.'
+      )
+    );
+
+    root.append(
+      moveGroup.details,
+      flowGroup.details
+    );
+
+    /*
+     * Die ursprünglichen Eingabefelder
+     * bleiben erhalten und werden lediglich
+     * in die Gruppen verschoben.
+     */
+
+    for (const child of [...body.children]) {
+      if (
+        /^H[1-6]$/.test(child.tagName) &&
+        [
+          'Verschieben',
+          'Ablauf'
+        ].includes(child.textContent.trim())
+      ) {
+        child.remove();
+      }
+    }
+
+    body.prepend(root);
+
+    console.log(
+      PREFIX,
+      `Einstellungen v${VERSION} geladen`
+    );
+
+    return true;
+  }
 
   async function createSettings() {
     if (typeof addOptions !== 'function') {
+      console.error(
+        PREFIX,
+        'NilsPe-Skriptbasis fehlt.'
+      );
       return;
     }
 
     await addOptions({
       identifier: SETTINGS_IDENTIFIER,
       title: 'Wachenverschieber',
-
-      settings: [
-        {
-          type: 'header',
-          text: 'Verschieben'
-        },
-        {
-          type: 'select',
-          key: KEYS.targetDispatchCenter,
-          label: 'Ziel-Leitstelle',
-          title: 'Ziel-Leitstelle auswählen',
-          multiple: false,
-          selectType: 'dispatch_centers'
-        },
-        {
-          type: 'text',
-          key: KEYS.nameFilter,
-          label: 'Namensfilter',
-          info: 'Es werden nur Wachen verschoben, deren Name diesen Text enthält.',
-          default: ''
-        },
-
-        {
-          type: 'header',
-          text: 'Ablauf'
-        },
-        {
-          type: 'number',
-          key: KEYS.concurrency,
-          label: 'Parallele Verschiebungen',
-          min: 1,
-          max: 5,
-          default: 3
-        },
-        {
-          type: 'number',
-          key: KEYS.requestDelay,
-          label: 'Pause zwischen Anfragen [ms]',
-          min: 0,
-          max: 5000,
-          default: 150
-        },
-        {
-          type: 'checkbox',
-          key: KEYS.requireConfirm,
-          label: 'Vor dem Verschieben Bestätigung anzeigen',
-          default: true
-        },
-        {
-          type: 'checkbox',
-          key: KEYS.dryRun,
-          label: 'Testlauf aktivieren',
-          default: false
-        }
-      ]
+      settings: SETTINGS
     });
+
+    const body = document.getElementById(
+      SETTINGS_IDENTIFIER
+    )?.querySelector('.settings-tab-body');
+
+    if (!body) return;
+
+    let scheduled = false;
+
+    new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+
+      queueMicrotask(() => {
+        scheduled = false;
+
+        try {
+          groupRenderedSettings();
+        } catch (error) {
+          console.error(
+            PREFIX,
+            'Einstellungen konnten nicht gruppiert werden:',
+            error
+          );
+        }
+      });
+    }).observe(body, {
+      childList: true
+    });
+
+    groupRenderedSettings();
   }
 
-  // ============================================================
-  // Konfiguration
-  // ============================================================
+  /*
+   * ==========================================
+   * KONFIGURATION
+   * ==========================================
+   */
 
-  function parseSelectValue(value, fallback = null) {
+  function parseSelectValue(
+    value,
+    fallback = null
+  ) {
     try {
-      const parsed = JSON.parse(value);
+      const parsed = typeof value === 'string'
+        ? JSON.parse(value)
+        : value;
 
       if (Array.isArray(parsed)) {
-        return parsed.length
-          ? Number(parsed[0])
+        if (!parsed.length) return fallback;
+
+        const number = Number(parsed[0]);
+
+        return Number.isSafeInteger(number)
+          ? number
           : fallback;
       }
 
-      return Number(parsed);
+      const number = Number(parsed);
+
+      return Number.isSafeInteger(number)
+        ? number
+        : fallback;
+
     } catch {
       const number = Number(value);
 
-      return Number.isFinite(number)
+      return Number.isSafeInteger(number)
         ? number
         : fallback;
     }
@@ -141,78 +635,88 @@
           await GM.getValue(
             KEYS.targetDispatchCenter,
             '[]'
-          ),
-          null
-        ),
-
-      nameFilter:
-        String(
-          await GM.getValue(
-            KEYS.nameFilter,
-            ''
-          )
-        ).trim(),
-
-      concurrency:
-        Math.max(
-          1,
-          Math.min(
-            5,
-            Number(
-              await GM.getValue(
-                KEYS.concurrency,
-                3
-              )
-            ) || 3
           )
         ),
 
-      requestDelay:
-        Math.max(
-          0,
-          Number(
-            await GM.getValue(
-              KEYS.requestDelay,
-              150
-            )
-          ) || 0
-        ),
-
-      dryRun:
+      nameFilter: String(
         await GM.getValue(
-          KEYS.dryRun,
-          false
-        ),
-
-      requireConfirm:
-        await GM.getValue(
-          KEYS.requireConfirm,
-          true
+          KEYS.nameFilter,
+          ''
         )
+      ).trim(),
+
+      concurrency: clampInteger(
+        await GM.getValue(
+          KEYS.concurrency,
+          3
+        ),
+        3, 1, 5
+      ),
+
+      requestDelay: clampInteger(
+        await GM.getValue(
+          KEYS.requestDelay,
+          150
+        ),
+        150, 0, 5000
+      ),
+
+      dryRun: await GM.getValue(
+        KEYS.dryRun,
+        false
+      ),
+
+      requireConfirm: await GM.getValue(
+        KEYS.requireConfirm,
+        true
+      )
     };
   }
 
-  // ============================================================
-  // Helper
-  // ============================================================
+  /*
+   * ==========================================
+   * GEBÄUDE LADEN
+   * ==========================================
+   */
 
   function normalize(value) {
     return String(value ?? '')
       .trim()
-      .toLowerCase();
+      .toLocaleLowerCase('de-DE');
   }
 
   function currentDispatchCenterId() {
-    return Number(
+    const heading = document.querySelector(
+      'h1[building_type]'
+    );
+
+    if (
+      Number(
+        heading?.getAttribute('building_type')
+      ) !== 7
+    ) {
+      throw new Error(
+        'Der Wachenverschieber kann nur auf einer Leitstelle gestartet werden.'
+      );
+    }
+
+    const id = Number(
       location.pathname.match(
         /^\/buildings\/(\d+)/
       )?.[1]
     );
-  }
 
-  // ============================================================
-  // Gebäude laden
-  // ============================================================
+    if (
+      !Number.isSafeInteger(id) ||
+      id <= 0
+    ) {
+      throw new Error(
+        'Quell-Leitstelle konnte nicht ermittelt werden.'
+      );
+    }
+
+    return id;
+  }
 
   function normalizeBuilding(building) {
     const dispatchCenterId =
@@ -223,18 +727,14 @@
 
     return {
       ...building,
-
-      id:
-        Number(building.id),
-
-      building_type:
-        Number(building.building_type),
-
+      id: Number(building.id),
+      building_type: Number(
+        building.building_type
+      ),
       leitstelle_building_id:
         dispatchCenterId == null
           ? null
           : Number(dispatchCenterId),
-
       caption:
         building.caption ||
         building.name ||
@@ -245,21 +745,18 @@
   async function loadBuildings(dispatchCenterId) {
     if (
       typeof openDb !== 'function' ||
-      typeof updateBuildings !== 'function'
+      typeof updateBuildings !== 'function' ||
+      typeof getDataByIndex !== 'function'
     ) {
       throw new Error(
         'NilsPe-Skriptbasis wurde nicht geladen.'
       );
     }
 
-    const db =
-      await openDb();
+    const db = await openDb();
 
     try {
-      await updateBuildings(
-        db,
-        60
-      );
+      await updateBuildings(db, 60);
 
       return (
         await getDataByIndex(
@@ -270,11 +767,14 @@
         )
       )
         .map(normalizeBuilding)
-        .sort(
-          (a, b) =>
-            a.id - b.id
-        );
-
+        .filter(building =>
+          Number.isSafeInteger(building.id) &&
+          building.id > 0 &&
+          building.leitstelle_building_id ===
+            dispatchCenterId &&
+          building.id !== dispatchCenterId
+        )
+        .sort((a, b) => a.id - b.id);
     } finally {
       db.close();
     }
@@ -284,26 +784,24 @@
     buildings,
     nameFilter
   ) {
-    const needle =
-      normalize(nameFilter);
+    const needle = normalize(nameFilter);
 
     if (!needle) {
       return [];
     }
 
-    return buildings.filter(
-      building =>
-        normalize(
-          building.caption
-        ).includes(
-          needle
-        )
+    return buildings.filter(building =>
+      normalize(building.caption).includes(
+        needle
+      )
     );
   }
 
-  // ============================================================
-  // Verschieben
-  // ============================================================
+  /*
+   * ==========================================
+   * VERSCHIEBEN
+   * ==========================================
+   */
 
   async function moveBuilding(
     buildingId,
@@ -313,32 +811,27 @@
       `/buildings/${buildingId}` +
       `/leitstelle-set/${targetDispatchCenterId}`;
 
-    const response =
-      await fetch(
-        url,
-        {
-          method: 'GET',
-          credentials: 'same-origin',
-
-          headers: {
-            'X-Requested-With':
-              'XMLHttpRequest'
-          },
-
-          redirect: 'follow'
-        }
-      );
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      redirect: 'follow'
+    });
 
     if (!response.ok) {
       throw new Error(
-        `HTTP ${response.status}`
+        `Gebäude ${buildingId}: HTTP ${response.status}`
       );
     }
   }
 
-  // ============================================================
-  // Fortschritt
-  // ============================================================
+  /*
+   * ==========================================
+   * FORTSCHRITTSANZEIGE
+   * ==========================================
+   */
 
   function ensureProgress() {
     if (
@@ -349,11 +842,8 @@
       return;
     }
 
-    const style =
-      document.createElement('style');
-
-    style.id =
-      'nilspe-mb-style';
+    const style = el('style');
+    style.id = 'nilspe-mb-style';
 
     style.textContent = `
       #nilspe-mb-progress {
@@ -365,9 +855,10 @@
         padding: 7px 12px;
         border-top: 1px solid #ddd;
         background: #f8f8f8;
+        color: #333;
       }
 
-      #nilspe-mb-row {
+      #nilspe-mb-progress-row {
         display: flex;
         align-items: center;
         gap: 12px;
@@ -393,99 +884,70 @@
         height: 100%;
         background: #d9534f;
       }
+
+      body.dark #nilspe-mb-progress,
+      body.dark-mode #nilspe-mb-progress {
+        background: #222;
+        color: #eee;
+        border-color: #444;
+      }
     `;
 
-    document.head.append(
-      style
+    document.head.append(style);
+
+    const container = el('div');
+    container.id = 'nilspe-mb-progress';
+
+    const row = el('div');
+    row.id = 'nilspe-mb-progress-row';
+
+    const cancel = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Abbrechen'
     );
 
-    const container =
-      document.createElement('div');
+    cancel.type = 'button';
+    cancel.id = 'nilspe-mb-cancel';
 
-    container.id =
-      'nilspe-mb-progress';
+    cancel.addEventListener('click', () => {
+      if (!running) return;
 
-    const row =
-      document.createElement('div');
+      cancelRequested = true;
+      cancel.disabled = true;
 
-    row.id =
-      'nilspe-mb-row';
+      const status = document.getElementById(
+        'nilspe-mb-status'
+      );
 
-    const cancel =
-      document.createElement('button');
-
-    cancel.type =
-      'button';
-
-    cancel.className =
-      'btn btn-default btn-xs';
-
-    cancel.textContent =
-      'Abbrechen';
-
-    cancel.addEventListener(
-      'click',
-      () => {
-        running = false;
-
-        setProgress(
-          'Abgebrochen',
-          0,
-          0,
-          0,
-          'danger'
-        );
+      if (status) {
+        status.className = 'label label-warning';
+        status.textContent =
+          'Abbruch angefordert – laufende Anfragen werden beendet ...';
       }
+    });
+
+    const status = el(
+      'span',
+      'label label-info',
+      'Bereit'
     );
 
-    const status =
-      document.createElement('span');
+    status.id = 'nilspe-mb-status';
 
-    status.id =
-      'nilspe-mb-status';
+    const track = el('div');
+    track.id = 'nilspe-mb-track';
 
-    status.className =
-      'label label-info';
+    const success = el('div');
+    success.id = 'nilspe-mb-success';
 
-    status.textContent =
-      'Bereit';
+    const errors = el('div');
+    errors.id = 'nilspe-mb-errors';
 
-    const track =
-      document.createElement('div');
-
-    track.id =
-      'nilspe-mb-track';
-
-    const success =
-      document.createElement('div');
-
-    success.id =
-      'nilspe-mb-success';
-
-    const errors =
-      document.createElement('div');
-
-    errors.id =
-      'nilspe-mb-errors';
-
-    track.append(
-      success,
-      errors
-    );
-
-    row.append(
-      cancel,
-      status
-    );
-
-    container.append(
-      row,
-      track
-    );
-
-    document.body.append(
-      container
-    );
+    track.append(success, errors);
+    row.append(cancel, status);
+    container.append(row, track);
+    document.body.append(container);
   }
 
   function setProgress(
@@ -497,67 +959,44 @@
   ) {
     ensureProgress();
 
-    const status =
-      document.getElementById(
-        'nilspe-mb-status'
-      );
+    const status = document.getElementById(
+      'nilspe-mb-status'
+    );
 
-    const success =
-      document.getElementById(
-        'nilspe-mb-success'
-      );
+    const success = document.getElementById(
+      'nilspe-mb-success'
+    );
 
-    const errorBar =
-      document.getElementById(
-        'nilspe-mb-errors'
-      );
+    const errorBar = document.getElementById(
+      'nilspe-mb-errors'
+    );
 
-    const safeTotal =
-      Math.max(
-        total,
-        1
-      );
+    const safeTotal = Math.max(total, 1);
 
-    status.className =
-      `label label-${type}`;
-
-    status.textContent =
-      message;
+    status.className = `label label-${type}`;
+    status.textContent = message;
 
     success.style.width =
-      `${Math.max(
-        0,
-        completed - errors
-      ) / safeTotal * 100}%`;
+      `${Math.max(0, completed - errors) /
+        safeTotal * 100}%`;
 
     errorBar.style.width =
       `${errors / safeTotal * 100}%`;
   }
 
-  // ============================================================
-  // Auswahl
-  // ============================================================
+  /*
+   * ==========================================
+   * AUSWAHL UND SICHERHEITSPRÜFUNGEN
+   * ==========================================
+   */
 
   async function selection() {
-    const config =
-      await configuration();
-
+    const config = await configuration();
     const sourceDispatchCenter =
       currentDispatchCenterId();
 
     if (
-      !Number.isInteger(
-        sourceDispatchCenter
-      ) ||
-      sourceDispatchCenter <= 0
-    ) {
-      throw new Error(
-        'Quell-Leitstelle konnte nicht ermittelt werden.'
-      );
-    }
-
-    if (
-      !Number.isInteger(
+      !Number.isSafeInteger(
         config.targetDispatchCenter
       ) ||
       config.targetDispatchCenter <= 0
@@ -576,9 +1015,7 @@
       );
     }
 
-    if (
-      !config.nameFilter
-    ) {
+    if (!config.nameFilter) {
       throw new Error(
         'Bitte zuerst einen Namensfilter eintragen.'
       );
@@ -588,16 +1025,14 @@
       'Gebäude werden aus dem API-Cache geladen ...'
     );
 
-    const buildings =
-      await loadBuildings(
-        sourceDispatchCenter
-      );
+    const buildings = await loadBuildings(
+      sourceDispatchCenter
+    );
 
-    const matchingBuildings =
-      filterBuildings(
-        buildings,
-        config.nameFilter
-      );
+    const matchingBuildings = filterBuildings(
+      buildings,
+      config.nameFilter
+    );
 
     return {
       config,
@@ -607,16 +1042,18 @@
     };
   }
 
-  // ============================================================
-  // Lauf
-  // ============================================================
+  /*
+   * ==========================================
+   * HAUPTABLAUF
+   * ==========================================
+   */
 
-  async function runMover(
-    buttons
-  ) {
-    if (running) {
+  async function runMover(buttons) {
+    if (running || busy) {
       return;
     }
+
+    busy = true;
 
     try {
       const {
@@ -624,33 +1061,23 @@
         matchingBuildings
       } = await selection();
 
-      if (
-        !matchingBuildings.length
-      ) {
+      if (!matchingBuildings.length) {
         setProgress(
           `Keine Wachen mit "${config.nameFilter}" gefunden`,
-          0,
-          0,
-          0,
-          'success'
+          0, 0, 0, 'success'
         );
-
         return;
       }
 
-      if (
-        config.requireConfirm
-      ) {
-        const preview =
-          matchingBuildings
-            .slice(0, 30)
-            .map(
-              building =>
-                `- ${building.caption}`
-            )
-            .join('\n');
+      if (config.requireConfirm) {
+        const preview = matchingBuildings
+          .slice(0, 30)
+          .map(building =>
+            `- ${building.caption}`
+          )
+          .join('\n');
 
-        const more =
+        const remaining =
           matchingBuildings.length > 30
             ? `\n\n... und ${
                 matchingBuildings.length - 30
@@ -658,208 +1085,207 @@
             : '';
 
         const message =
-          config.dryRun
-            ? `Testlauf:\n\n` +
-              `${matchingBuildings.length} Wachen würden verschoben.\n\n` +
-              `Filter: "${config.nameFilter}"\n` +
-              `Ziel-Leitstelle: ${config.targetDispatchCenter}\n\n` +
-              `${preview}${more}`
-            : `${matchingBuildings.length} Wachen werden verschoben.\n\n` +
-              `Filter: "${config.nameFilter}"\n` +
-              `Ziel-Leitstelle: ${config.targetDispatchCenter}\n\n` +
-              `${preview}${more}`;
+          `${config.dryRun ? 'Testlauf' : 'Verschieben'}:\n\n` +
+          `${formatCount(matchingBuildings.length)} Wachen ` +
+          `${config.dryRun ? 'würden verschoben' : 'werden verschoben'}.\n\n` +
+          `Filter: "${config.nameFilter}"\n` +
+          `Ziel-Leitstelle: ${config.targetDispatchCenter}\n\n` +
+          `${preview}${remaining}`;
 
-        if (
-          !globalThis.confirm(
-            message
-          )
-        ) {
+        if (!window.confirm(message)) {
           setProgress(
             'Verschieben nicht gestartet',
-            0,
-            0,
-            0,
-            'warning'
+            0, 0, 0, 'warning'
           );
-
           return;
         }
       }
 
       running = true;
+      cancelRequested = false;
 
-      buttons.forEach(
-        button =>
-          button.disabled = true
+      for (const button of buttons) {
+        button.disabled = true;
+      }
+
+      ensureProgress();
+
+      const cancelButton = document.getElementById(
+        'nilspe-mb-cancel'
       );
+
+      if (cancelButton) {
+        cancelButton.disabled = false;
+      }
 
       let completed = 0;
       let errors = 0;
       let moved = 0;
+      let nextIndex = 0;
+
+      const total = matchingBuildings.length;
 
       setProgress(
         config.dryRun
-          ? `Testlauf: 0/${matchingBuildings.length}`
-          : `0/${matchingBuildings.length} Wachen`,
-        0,
-        0,
-        matchingBuildings.length
+          ? `Testlauf: 0/${total}`
+          : `0/${total} Wachen`,
+        0, 0, total
       );
 
-      async function worker(
-        building
-      ) {
-        if (!running) {
-          return;
-        }
+      /*
+       * Maximal die eingestellte Anzahl
+       * gleichzeitiger Anfragen.
+       *
+       * Beim Abbruch starten keine
+       * weiteren Verschiebungen mehr.
+       */
 
-        try {
-          if (
-            !config.dryRun
-          ) {
-            await moveBuilding(
+      async function worker() {
+        while (!cancelRequested) {
+          const index = nextIndex++;
+
+          if (index >= total) {
+            return;
+          }
+
+          const building =
+            matchingBuildings[index];
+
+          try {
+            if (!config.dryRun) {
+              await moveBuilding(
+                building.id,
+                config.targetDispatchCenter
+              );
+            }
+
+            moved++;
+
+          } catch (error) {
+            errors++;
+
+            console.error(
+              PREFIX,
+              'Gebäude fehlgeschlagen:',
               building.id,
-              config.targetDispatchCenter
+              building.caption,
+              error
             );
           }
 
-          moved++;
+          completed++;
 
-        } catch (error) {
-          errors++;
-
-          console.error(
-            '[Wachenverschieber] Gebäude fehlgeschlagen:',
-            building.id,
-            building.caption,
-            error
+          setProgress(
+            config.dryRun
+              ? `${completed}/${total} im Testlauf geprüft`
+              : `${completed}/${total} bearbeitet, ${moved} verschoben`,
+            completed,
+            errors,
+            total,
+            errors ? 'warning' : 'info'
           );
+
+          if (
+            !cancelRequested &&
+            config.requestDelay > 0
+          ) {
+            await sleep(
+              config.requestDelay
+            );
+          }
         }
+      }
 
-        completed++;
+      await Promise.all(
+        Array.from(
+          {
+            length: Math.min(
+              config.concurrency,
+              total
+            )
+          },
+          () => worker()
+        )
+      );
 
+      if (cancelRequested) {
         setProgress(
-          config.dryRun
-            ? `${completed}/${matchingBuildings.length} geprüft`
-            : `${completed}/${matchingBuildings.length} bearbeitet, ${moved} verschoben`,
+          `Abgebrochen: ${moved} ${config.dryRun ? 'geprüft' : 'verschoben'}, ` +
+          `${errors} Fehler, ${total - completed} offen`,
           completed,
           errors,
-          matchingBuildings.length,
-          errors
-            ? 'warning'
-            : 'success'
+          total,
+          'warning'
         );
-      }
-
-      if (
-        typeof runWithConcurrency ===
-        'function'
-      ) {
-        await runWithConcurrency(
-          matchingBuildings,
-          worker,
-          {
-            concurrency:
-              config.concurrency,
-
-            delay:
-              config.requestDelay,
-
-            shouldContinue:
-              () => running
-          }
-        );
-
       } else {
-        for (
-          const building of matchingBuildings
-        ) {
-          if (!running) {
-            break;
-          }
-
-          await worker(
-            building
-          );
-        }
+        setProgress(
+          config.dryRun
+            ? `Testlauf fertig: ${moved} Wachen geprüft`
+            : `Fertig: ${moved} verschoben, ${errors} Fehler`,
+          completed,
+          errors,
+          total,
+          errors ? 'warning' : 'success'
+        );
       }
-
-      if (!running) {
-        return;
-      }
-
-      setProgress(
-        config.dryRun
-          ? `Testlauf fertig: ${moved} Wachen geprüft`
-          : `Fertig: ${moved} verschoben, ${errors} Fehler`,
-        completed,
-        errors,
-        matchingBuildings.length,
-        errors
-          ? 'warning'
-          : 'success'
-      );
 
     } catch (error) {
       console.error(
-        '[Wachenverschieber] Lauf fehlgeschlagen:',
+        PREFIX,
+        'Lauf fehlgeschlagen:',
         error
       );
 
       setProgress(
         `Fehler: ${error.message ?? error}`,
-        0,
-        0,
-        0,
-        'danger'
+        0, 0, 0, 'danger'
       );
-
     } finally {
       running = false;
+      busy = false;
+      cancelRequested = false;
 
-      buttons.forEach(
-        button =>
-          button.disabled = false
+      for (const button of buttons) {
+        button.disabled = false;
+      }
+
+      const cancelButton = document.getElementById(
+        'nilspe-mb-cancel'
       );
+
+      if (cancelButton) {
+        cancelButton.disabled = true;
+      }
     }
   }
 
-  // ============================================================
-  // Settings Button
-  // ============================================================
+  /*
+   * ==========================================
+   * BUTTONS
+   * ==========================================
+   */
 
   function settingsButton() {
-    const button =
-      document.createElement('a');
-
-    button.className =
-      'btn btn-default btn-xs';
-
-    button.href =
-      `/settings/index#${SETTINGS_IDENTIFIER}`;
-
-    button.target =
-      '_blank';
-
-    button.title =
-      'Einstellungen';
-
-    const icon =
-      document.createElement('span');
-
-    icon.className =
-      'glyphicon glyphicon-cog';
-
-    button.append(
-      icon
+    const link = el(
+      'a',
+      'btn btn-default btn-xs'
     );
 
-    return button;
-  }
+    link.href =
+      `/settings/index#${SETTINGS_IDENTIFIER}`;
 
-  // ============================================================
-  // UI
-  // ============================================================
+    link.target = '_blank';
+    link.title = 'Einstellungen';
+
+    link.append(
+      el(
+        'span',
+        'glyphicon glyphicon-cog'
+      )
+    );
+
+    return link;
+  }
 
   function buildingTable() {
     return (
@@ -872,12 +1298,15 @@
     );
   }
 
-  async function addButtons() {
+  function addButtons() {
+    const heading = document.querySelector(
+      'h1[building_type]'
+    );
+
     if (
-      addingButtons ||
-      document.getElementById(
-        'nilspe-mb-button-row'
-      ) ||
+      Number(
+        heading?.getAttribute('building_type')
+      ) !== 7 ||
       document.getElementById(
         'nilspe-mb-buttons'
       )
@@ -885,112 +1314,58 @@
       return;
     }
 
-    const heading =
-      document.querySelector(
-        'h1[building_type]'
-      );
+    const table = buildingTable();
 
-    if (
-      Number(
-        heading?.getAttribute(
-          'building_type'
-        )
-      ) !== 7
-    ) {
+    if (!table?.parentElement) {
       return;
     }
 
-    const table =
-      buildingTable();
+    const group = el(
+      'div',
+      'btn-group'
+    );
 
-    if (!table) {
-      return;
-    }
+    group.id = 'nilspe-mb-buttons';
 
-    addingButtons = true;
+    const moveButton = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Wachen verschieben'
+    );
 
-    try {
-      if (
-        document.getElementById(
-          'nilspe-mb-button-row'
-        )
-      ) {
-        return;
-      }
+    moveButton.type = 'button';
 
-      const group =
-        document.createElement('div');
+    const buttons = [moveButton];
 
-      group.id =
-        'nilspe-mb-buttons';
+    moveButton.addEventListener(
+      'click',
+      () => void runMover(buttons)
+    );
 
-      group.className =
-        'btn-group';
+    group.append(
+      moveButton,
+      settingsButton()
+    );
 
-      const moveButton =
-        document.createElement(
-          'button'
-        );
+    const row = el('div');
+    row.id = 'nilspe-mb-button-row';
 
-      moveButton.type =
-        'button';
+    row.style.cssText =
+      'display:block;width:100%;margin:0';
 
-      moveButton.className =
-        'btn btn-default btn-xs';
+    row.append(group);
 
-      moveButton.textContent =
-        'Wachen verschieben';
-
-      const buttons = [
-        moveButton
-      ];
-
-      moveButton.addEventListener(
-        'click',
-        () =>
-          runMover(buttons)
-      );
-
-      group.append(
-        moveButton,
-        settingsButton()
-      );
-
-      const row =
-        document.createElement(
-          'div'
-        );
-
-      row.id =
-        'nilspe-mb-button-row';
-
-      row.style.display =
-        'block';
-
-      row.style.width =
-        '100%';
-
-      row.style.margin =
-        '0';
-
-      row.append(
-        group
-      );
-
-      table.parentElement
-        ?.insertBefore(
-          row,
-          table
-        );
-
-    } finally {
-      addingButtons = false;
-    }
+    table.parentElement.insertBefore(
+      row,
+      table
+    );
   }
 
-  // ============================================================
-  // Start
-  // ============================================================
+  /*
+   * ==========================================
+   * INITIALISIERUNG
+   * ==========================================
+   */
 
   if (
     location.pathname.startsWith(
@@ -998,15 +1373,10 @@
     )
   ) {
     await createSettings();
-
   } else {
-    void addButtons();
+    addButtons();
 
-    new MutationObserver(
-      () => {
-        void addButtons();
-      }
-    ).observe(
+    new MutationObserver(addButtons).observe(
       document.body,
       {
         childList: true,
@@ -1015,4 +1385,8 @@
     );
   }
 
+  console.log(
+    PREFIX,
+    `Version ${VERSION} geladen`
+  );
 })();
