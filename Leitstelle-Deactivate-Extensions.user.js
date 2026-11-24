@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Extensions
 // @namespace    NilsPe.activate.extensions
-// @version      1.1.0
+// @version      1.1.3
 // @description  Aktiviert oder deaktiviert konfigurierte Erweiterungen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -340,7 +340,7 @@
           const content = document.createElement('div');
           content.style.padding = '10px';
           const toolbar = document.createElement('div');
-          toolbar.style.cssText = 'display:flex;gap:5px;margin-bottom:8px';
+          toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px';
           const list = document.createElement('div');
           const key = `${prefix}${buildingType.id}`;
           let saveQueue = Promise.resolve();
@@ -397,8 +397,8 @@
             const button = document.createElement('button');
             button.type = 'button';
             button.className = `btn btn-xs ${color}`;
-            button.style.width = '78px';
-            button.style.padding = '1px 2px';
+            button.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 110px;width:110px;height:28px;margin:0;padding:2px 6px;vertical-align:middle;white-space:nowrap;font-size:13px;line-height:1';
+            button.title = active ? 'Alle Erweiterungen auswählen' : 'Alle Erweiterungen abwählen';
             button.textContent = text;
             button.addEventListener('click', () => {
               selected.clear();
