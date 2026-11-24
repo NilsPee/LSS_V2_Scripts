@@ -1,7 +1,8 @@
+
 // ==UserScript==
 // @name         Leitstelle De-/Activate Extensions
 // @namespace    NilsPe.activate.extensions
-// @version      1.1.3
+// @version      1.2.2
 // @description  Aktiviert oder deaktiviert konfigurierte Erweiterungen einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -24,11 +25,16 @@
 (async function () {
   'use strict';
 
+  const VERSION = '1.2.2';
+  const PREFIX = '[De-/Activate Extensions]';
   const SETTINGS_IDENTIFIER = 'nilspe_activate_extensions';
+
   const ACTIVATE_PREFIX = 'nilspe_ae_activate_';
   const DEACTIVATE_PREFIX = 'nilspe_ae_deactivate_';
+
   const ACTION_DELAY_KEY = 'nilspe_ae_action_delay';
   const BUILDING_DELAY_KEY = 'nilspe_ae_building_delay';
+
   const DEFAULT_ACTION_DELAY = 200;
   const DEFAULT_BUILDING_DELAY = 100;
 
@@ -56,7 +62,7 @@
     [24, 'Reiterstaffel'],
     [25, 'Bergrettung'],
     [26, 'Seenotrettungswache'],
-    [27, 'Schule fuer Seefahrt und Seenotrettung'],
+    [27, 'Schule für Seefahrt und Seenotrettung'],
     [28, 'Hubschrauberstation (Seenotrettung)'],
     [29, 'Autobahnpolizei']
   ].map(([id, name]) => ({ id, name }));
@@ -68,70 +74,109 @@
     }));
   }
 
+  /*
+   * ==========================================
+   * ERWEITERUNGSKATALOG
+   * ==========================================
+   */
+
   const EXTENSIONS = new Map([
     [0, [
       { value: 0, name: 'Rettungsdienst' },
-      ...numberedOptions('Abrollbehaelter', [1, 2, 3, 4, 5, 7, 10, 11, 12, 17]),
+      ...numberedOptions(
+        'Abrollbehälter',
+        [1, 2, 3, 4, 5, 7, 10, 11, 12, 17]
+      ),
       { value: 6, name: 'Wasserrettung' },
       { value: 8, name: 'Flughafen' },
-      { value: 9, name: 'Grosswache' },
+      { value: 9, name: 'Großwache' },
       { value: 13, name: 'Werkfeuerwehr' },
       { value: 14, name: 'NEA50' },
       { value: 15, name: 'NEA200' },
-      { value: 16, name: 'Luefter' },
+      { value: 16, name: 'Lüfter' },
       { value: 18, name: 'Drohnen-Erweiterung' },
       { value: 19, name: 'Verpflegungsdienst' },
-      ...numberedOptions('Anhaenger-Stellplatz', [20, 21, 22, 23, 24]),
+      ...numberedOptions(
+        'Anhänger-Stellplatz',
+        [20, 21, 22, 23, 24]
+      ),
       { value: 25, name: 'Bahnrettung' }
     ]],
+
     [18, [
       { value: 0, name: 'Rettungsdienst' },
-      ...numberedOptions('Abrollbehaelter', [1, 2, 3, 4, 5, 7, 10, 11, 12, 17]),
+      ...numberedOptions(
+        'Abrollbehälter',
+        [1, 2, 3, 4, 5, 7, 10, 11, 12, 17]
+      ),
       { value: 6, name: 'Wasserrettung' },
       { value: 8, name: 'Flughafen' },
-      { value: 9, name: 'Grosswache' },
+      { value: 9, name: 'Großwache' },
       { value: 13, name: 'Werkfeuerwehr' },
       { value: 14, name: 'NEA50' },
       { value: 15, name: 'NEA200' },
-      { value: 16, name: 'Luefter' },
+      { value: 16, name: 'Lüfter' },
       { value: 18, name: 'Drohnen-Erweiterung' },
       { value: 19, name: 'Verpflegungsdienst' },
-      ...numberedOptions('Anhaenger-Stellplatz', [20, 21, 22, 23, 24]),
+      ...numberedOptions(
+        'Anhänger-Stellplatz',
+        [20, 21, 22, 23, 24]
+      ),
       { value: 25, name: 'Bahnrettung' }
     ]],
-    [2, [{ value: 0, name: 'Grosswache' }]],
-    [20, [{ value: 0, name: 'Grosswache' }]],
+
+    [2, [
+      { value: 0, name: 'Großwache' }
+    ]],
+
+    [20, [
+      { value: 0, name: 'Großwache' }
+    ]],
+
     [4, [
       { value: 0, name: 'Allgemeine Innere' },
       { value: 1, name: 'Allgemeine Chirurgie' },
-      { value: 2, name: 'Gynaekologie' },
+      { value: 2, name: 'Gynäkologie' },
       { value: 3, name: 'Urologie' },
       { value: 4, name: 'Unfallchirurgie' },
       { value: 5, name: 'Neurologie' },
       { value: 6, name: 'Neurochirurgie' },
       { value: 7, name: 'Kardiologie' },
       { value: 8, name: 'Kardiochirurgie' },
-      { value: 9, name: 'Grosskrankenhaus' }
+      { value: 9, name: 'Großkrankenhaus' }
     ]],
+
     [6, [
-      ...numberedOptions('Zelle', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+      ...numberedOptions(
+        'Zelle',
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      ),
       { value: 10, name: 'Diensthundestaffel' },
       { value: 11, name: 'Kriminalpolizei' },
       { value: 12, name: 'Dienstgruppenleitung' },
       { value: 13, name: 'Motorradstaffel' },
-      { value: 14, name: 'Grosswache' },
-      { value: 15, name: 'Grossgewahrsam' }
+      { value: 14, name: 'Großwache' },
+      { value: 15, name: 'Großgewahrsam' }
     ]],
+
     [19, [
-      ...numberedOptions('Zelle', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+      ...numberedOptions(
+        'Zelle',
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      ),
       { value: 10, name: 'Diensthundestaffel' },
       { value: 11, name: 'Kriminalpolizei' },
       { value: 12, name: 'Dienstgruppenleitung' },
       { value: 13, name: 'Motorradstaffel' },
-      { value: 14, name: 'Grosswache' },
-      { value: 15, name: 'Grossgewahrsam' }
+      { value: 14, name: 'Großwache' },
+      { value: 15, name: 'Großgewahrsam' }
     ]],
-    [16, numberedOptions('Zelle', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])],
+
+    [16, numberedOptions(
+      'Zelle',
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    )],
+
     [11, [
       { value: 0, name: '2. Zug der Hundertschaft' },
       { value: 1, name: '3. Zug der Hundertschaft' },
@@ -145,26 +190,55 @@
       { value: 9, name: 'Reiterstaffel' },
       { value: 10, name: 'LauKW' }
     ]],
+
     [9, [
-      { value: 0, name: '1. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung' },
-      { value: 1, name: '1. Technischer Zug: Zugtrupp' },
-      { value: 2, name: 'Fachgruppe Raeumen' },
+      {
+        value: 0,
+        name: '1. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung'
+      },
+      {
+        value: 1,
+        name: '1. Technischer Zug: Zugtrupp'
+      },
+      { value: 2, name: 'Fachgruppe Räumen' },
       { value: 3, name: 'Fachgruppe Wassergefahren' },
-      { value: 4, name: '2. Technischer Zug - Grundvoraussetzungen' },
-      { value: 5, name: '2. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung' },
-      { value: 6, name: '2. Technischer Zug: Zugtrupp' },
+      {
+        value: 4,
+        name: '2. Technischer Zug - Grundvoraussetzungen'
+      },
+      {
+        value: 5,
+        name: '2. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung'
+      },
+      {
+        value: 6,
+        name: '2. Technischer Zug: Zugtrupp'
+      },
       { value: 7, name: 'Fachgruppe Ortung' },
       { value: 8, name: 'Fachgruppe Wasserschaden/Pumpen' },
       { value: 9, name: 'Fachgruppe schwere Bergung' },
       { value: 10, name: 'Fachgruppe Elektroversorgung' },
-      { value: 11, name: 'Ortsverbands-Mannschaftstransportwagen' },
-      { value: 12, name: 'Trupp Unbemannte Luftfahrtsysteme' },
-      { value: 13, name: 'Fachzug Fuehrung und Kommunikation' },
-      { value: 14, name: 'Fachgruppe Logistik-Verpflegung' }
+      {
+        value: 11,
+        name: 'Ortsverbands-Mannschaftstransportwagen'
+      },
+      {
+        value: 12,
+        name: 'Trupp Unbemannte Luftfahrtsysteme'
+      },
+      {
+        value: 13,
+        name: 'Fachzug Führung und Kommunikation'
+      },
+      {
+        value: 14,
+        name: 'Fachgruppe Logistik-Verpflegung'
+      }
     ]],
+
     [12, [
-      { value: 0, name: 'Fuehrung' },
-      { value: 1, name: 'Sanitaetsdienst' },
+      { value: 0, name: 'Führung' },
+      { value: 1, name: 'Sanitätsdienst' },
       { value: 2, name: 'Wasserrettungs-Erweiterung' },
       { value: 3, name: 'Rettungshundestaffel' },
       { value: 4, name: 'SEG Drohne' },
@@ -173,16 +247,36 @@
     ]]
   ]);
 
-  const sleep = milliseconds =>
-    new Promise(resolve => setTimeout(resolve, milliseconds));
-
   let running = false;
   let cancelled = false;
+  let buttons = [];
+
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
+
+  function el(tag, className = '', text = '') {
+    const element = document.createElement(tag);
+
+    if (className) {
+      element.className = className;
+    }
+
+    if (text) {
+      element.textContent = text;
+    }
+
+    return element;
+  }
 
   function parseStoredArray(value) {
     try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
+      const parsed = typeof value === 'string'
+        ? JSON.parse(value)
+        : value;
+
+      return Array.isArray(parsed)
+        ? parsed
+        : [];
     } catch {
       return [];
     }
@@ -190,9 +284,37 @@
 
   async function selectedIds(prefix, buildingType) {
     return parseStoredArray(
-      await GM.getValue(`${prefix}${buildingType}`, '[]')
-    ).map(Number).filter(Number.isInteger);
+      await GM.getValue(
+        `${prefix}${buildingType}`,
+        '[]'
+      )
+    )
+      .map(Number)
+      .filter(Number.isInteger);
   }
+
+  function safeNumber(raw, fallback, min, max) {
+    const number = Number(raw);
+
+    if (!Number.isFinite(number)) {
+      return fallback;
+    }
+
+    return Math.max(
+      min,
+      Math.min(max, Math.floor(number))
+    );
+  }
+
+  function formatNumber(value) {
+    return Number(value).toLocaleString('de-DE');
+  }
+
+  /*
+   * ==========================================
+   * GEBÄUDE LADEN
+   * ==========================================
+   */
 
   function normalizeBuilding(building) {
     const dispatchCenterId =
@@ -206,37 +328,62 @@
       id: Number(building.id),
       building_type: Number(building.building_type),
       leitstelle_building_id:
-        dispatchCenterId == null ? null : Number(dispatchCenterId),
-      caption: building.caption || building.name || `Gebaeude ${building.id}`,
+        dispatchCenterId == null
+          ? null
+          : Number(dispatchCenterId),
+      caption:
+        building.caption ||
+        building.name ||
+        `Gebäude ${building.id}`,
       extensions: Array.isArray(building.extensions)
         ? building.extensions.map(extension => ({
-          ...extension,
-          type_id: Number(extension.type_id),
-          enabled: extension.enabled === true
-        }))
+            ...extension,
+            type_id: Number(extension.type_id),
+            enabled: extension.enabled === true
+          }))
         : []
     };
   }
 
   async function loadBuildings(dispatchCenterId) {
-    if (typeof openDb !== 'function' || typeof updateBuildings !== 'function') {
-      throw new Error('NilsPe-Skriptbasis wurde nicht geladen.');
+    if (
+      typeof openDb !== 'function' ||
+      typeof updateBuildings !== 'function' ||
+      typeof getDataByIndex !== 'function'
+    ) {
+      throw new Error(
+        'NilsPe-Skriptbasis wurde nicht geladen.'
+      );
     }
 
     const db = await openDb();
 
     try {
       await updateBuildings(db, 60);
-      return (await getDataByIndex(
-        db,
-        'buildings',
-        'leitstelle_building_id',
-        Number(dispatchCenterId)
-      )).map(normalizeBuilding).sort((a, b) => a.id - b.id);
+
+      return (
+        await getDataByIndex(
+          db,
+          'buildings',
+          'leitstelle_building_id',
+          Number(dispatchCenterId)
+        )
+      )
+        .map(normalizeBuilding)
+        .sort((a, b) => a.id - b.id);
     } finally {
       db.close();
     }
   }
+
+  /*
+   * ==========================================
+   * ERWEITERUNGEN FÜR EINSTELLUNGEN
+   * ==========================================
+   *
+   * Grundkatalog + aus API-Cache
+   * erkannte Erweiterungen.
+   */
 
   async function extensionOptions() {
     const optionsByType = new Map();
@@ -246,12 +393,18 @@
         buildingType.id,
         new Map(
           (EXTENSIONS.get(buildingType.id) ?? [])
-            .map(option => [Number(option.value), option])
+            .map(option => [
+              Number(option.value),
+              option
+            ])
         )
       );
     }
 
-    if (typeof openDb !== 'function' || typeof updateBuildings !== 'function') {
+    if (
+      typeof openDb !== 'function' ||
+      typeof updateBuildings !== 'function'
+    ) {
       return optionsByType;
     }
 
@@ -260,16 +413,24 @@
     try {
       await updateBuildings(db, 60);
 
-      for (const rawBuilding of await getAllData(db, 'buildings')) {
-        const building = normalizeBuilding(rawBuilding);
-        const options = optionsByType.get(building.building_type);
+      for (
+        const rawBuilding of
+        await getAllData(db, 'buildings')
+      ) {
+        const building = normalizeBuilding(
+          rawBuilding
+        );
 
-        if (!options) {
-          continue;
-        }
+        const options = optionsByType.get(
+          building.building_type
+        );
+
+        if (!options) continue;
 
         for (const extension of building.extensions) {
-          if (!Number.isInteger(extension.type_id)) {
+          if (
+            !Number.isInteger(extension.type_id)
+          ) {
             continue;
           }
 
@@ -285,7 +446,8 @@
       }
     } catch (error) {
       console.warn(
-        '[De-/Activate Extensions] API-Erweiterungen konnten nicht geladen werden:',
+        PREFIX,
+        'API-Erweiterungen konnten nicht geladen werden:',
         error
       );
     } finally {
@@ -295,203 +457,762 @@
     return optionsByType;
   }
 
-  async function createSettings() {
-    if (typeof waitForSettingsDom !== 'function' ||
-        typeof createSettingsPane !== 'function') {
-      console.error('[De-/Activate Extensions] NilsPe-Skriptbasis fehlt.');
+  /*
+   * ==========================================
+   * EINHEITLICHER EINSTELLUNGSSTANDARD
+   * ==========================================
+   *
+   * Überschrift und Beschreibung
+   * identisch zum Delete-Buildings-Stil.
+   */
+
+  function injectSettingsStyles() {
+    if (
+      document.getElementById(
+        'nilspe-ae-settings-style'
+      )
+    ) {
       return;
     }
-    if (!await waitForSettingsDom()) return;
 
-    const { anchor, body } = createSettingsPane(
-      SETTINGS_IDENTIFIER, 'De-/Activate Extensions'
-    );
-    let rendered = false;
-    anchor.addEventListener('click', () => void renderSettings());
+    const style = el('style');
+    style.id = 'nilspe-ae-settings-style';
 
-    async function renderSettings() {
-      if (rendered) return;
-      rendered = true;
-      const optionsByType = await extensionOptions();
-
-      for (const [prefix, title] of [
-        [ACTIVATE_PREFIX, 'Erweiterungen aktivieren'],
-        [DEACTIVATE_PREFIX, 'Erweiterungen deaktivieren']
-      ]) {
-        const heading = document.createElement('h2');
-        heading.textContent = title;
-        body.append(heading);
-
-        for (const buildingType of BUILDING_TYPES) {
-          const options = [...(optionsByType.get(buildingType.id)?.values() ?? [])]
-            .sort((a, b) => Number(a.value) - Number(b.value));
-          if (!options.length) continue;
-
-          const selected = new Set(await selectedIds(prefix, buildingType.id));
-          const panel = document.createElement('details');
-          panel.style.cssText = 'margin-bottom:7px;border:1px solid #8885;border-radius:4px';
-          const summary = document.createElement('summary');
-          summary.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:9px 12px;cursor:pointer;background:#8882';
-          const name = document.createElement('strong');
-          name.textContent = `${buildingType.id} – ${buildingType.name}`;
-          const count = document.createElement('span');
-          count.className = 'label label-default';
-          summary.append(name, count);
-          const content = document.createElement('div');
-          content.style.padding = '10px';
-          const toolbar = document.createElement('div');
-          toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px';
-          const list = document.createElement('div');
-          const key = `${prefix}${buildingType.id}`;
-          let saveQueue = Promise.resolve();
-
-          function save() {
-            const snapshot = [...selected];
-            saveQueue = saveQueue.catch(() => {}).then(() =>
-              GM.setValue(key, JSON.stringify(snapshot))
-            );
-            void saveQueue.catch(error =>
-              console.error('[De-/Activate Extensions] Speichern fehlgeschlagen:', error)
-            );
-          }
-
-          function update() {
-            count.textContent = `${selected.size} / ${options.length} ausgewählt`;
-            count.className = selected.size ? 'label label-success' : 'label label-default';
-            list.replaceChildren();
-            for (const option of options) {
-              const id = Number(option.value);
-              const active = selected.has(id);
-              const row = document.createElement('div');
-              row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;border:1px solid;border-radius:3px';
-              row.style.background = active ? 'rgba(92, 184, 92, .10)' : '#8881';
-              row.style.borderColor = active ? 'rgba(92, 184, 92, .35)' : '#8885';
-              const label = document.createElement('span');
-              label.style.flex = '1';
-              label.style.cursor = 'pointer';
-              label.style.opacity = active ? '1' : '.6';
-              label.textContent = `${option.name} (${id})`;
-              const toggle = document.createElement('button');
-              toggle.type = 'button';
-              toggle.className = active ? 'btn btn-danger btn-xs' : 'btn btn-success btn-xs';
-              toggle.style.width = '30px';
-              toggle.textContent = active ? '✕' : '✓';
-              toggle.title = active ? 'Erweiterung abwählen' : 'Erweiterung auswählen';
-              function toggleSelection() {
-                if (selected.has(id)) selected.delete(id);
-                else selected.add(id);
-                update();
-                save();
-              }
-              label.addEventListener('click', toggleSelection);
-              toggle.addEventListener('click', toggleSelection);
-              row.append(label, toggle);
-              list.append(row);
-            }
-          }
-
-          for (const [text, active, color] of [
-            ['Alle auswählen', true, 'btn-success'],
-            ['Alle abwählen', false, 'btn-danger']
-          ]) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = `btn btn-xs ${color}`;
-            button.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 110px;width:110px;height:28px;margin:0;padding:2px 6px;vertical-align:middle;white-space:nowrap;font-size:13px;line-height:1';
-            button.title = active ? 'Alle Erweiterungen auswählen' : 'Alle Erweiterungen abwählen';
-            button.textContent = text;
-            button.addEventListener('click', () => {
-              selected.clear();
-              if (active) for (const option of options) selected.add(Number(option.value));
-              update();
-              save();
-            });
-            toolbar.append(button);
-          }
-          update();
-          content.append(toolbar, list);
-          panel.append(summary, content);
-          body.append(panel);
-        }
+    style.textContent = `
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-info {
+        margin-bottom: 10px;
+        font-size: 12px;
+        opacity: .85;
       }
 
-      const flow = document.createElement('h2');
-      flow.textContent = 'Ablauf';
-      body.append(flow);
-      for (const [key, label, fallback] of [
-        [ACTION_DELAY_KEY, 'Pause nach einer Umschaltung [ms]', DEFAULT_ACTION_DELAY],
-        [BUILDING_DELAY_KEY, 'Pause nach einem Gebäude [ms]', DEFAULT_BUILDING_DELAY]
-      ]) {
-        const field = document.createElement('label');
-        field.style.cssText = 'display:block;margin-bottom:10px';
-        field.textContent = label;
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.max = '5000';
-        input.className = 'form-control';
-        input.style.width = '130px';
-        input.value = await GM.getValue(key, fallback);
-        input.addEventListener('change', () => {
-          void GM.setValue(key, Math.min(5000, Math.max(0, Number(input.value) || 0)));
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-group {
+        margin-bottom: 7px;
+        border: 1px solid #8885;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-group > summary {
+        padding: 9px 12px;
+        background: #8882;
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-content {
+        padding: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-subgroup {
+        margin-bottom: 6px;
+        border: 1px solid #8885;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-subgroup > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 12px;
+        background: #8882;
+        cursor: pointer;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-subgroup-content {
+        padding: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 9px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-bulk {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        width: 110px;
+        height: 28px;
+        margin: 0 !important;
+        padding: 2px 6px !important;
+        font-size: 13px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-option {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 9px;
+        margin-bottom: 4px;
+        background: #8881;
+        border: 1px solid #8885;
+        border-radius: 3px;
+        box-sizing: border-box;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-option.active {
+        background: rgba(92,184,92,.10);
+        border-color: rgba(92,184,92,.35);
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-option-label {
+        flex: 1;
+        margin: 0;
+        cursor: pointer;
+        font-weight: normal;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-option:not(.active)
+      .nilspe-ae-option-label {
+        opacity: .7;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-toggle {
+        flex: 0 0 30px;
+        width: 30px;
+        min-width: 30px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-number {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 7px 9px;
+        margin-bottom: 4px;
+        border: 1px solid rgba(92,184,92,.35);
+        border-radius: 3px;
+        background: rgba(92,184,92,.10);
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-number input {
+        flex: 0 0 84px;
+        width: 84px !important;
+        height: 28px !important;
+        padding: 3px 7px !important;
+        box-sizing: border-box;
+        text-align: left;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-number label {
+        flex: 1;
+        margin: 0;
+        font-weight: normal;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-ae-save {
+        font-size: 12px;
+        opacity: .75;
+      }
+    `;
+
+    document.head.append(style);
+  }
+
+  function makeGroup(title, description) {
+    const details = el(
+      'details',
+      'nilspe-ae-group'
+    );
+
+    const summary = el(
+      'summary',
+      '',
+      title
+    );
+
+    const content = el(
+      'div',
+      'nilspe-ae-content'
+    );
+
+    if (description) {
+      content.append(
+        el(
+          'p',
+          'nilspe-ae-info',
+          description
+        )
+      );
+    }
+
+    details.append(summary, content);
+
+    return { details, content };
+  }
+
+  /*
+   * ==========================================
+   * AUSWAHLLISTE JE GEBÄUDETYP
+   * ==========================================
+   */
+
+  async function createExtensionSelection(
+    parent,
+    prefix,
+    buildingType,
+    options
+  ) {
+    if (!options.length) return;
+
+    const storageKey =
+      `${prefix}${buildingType.id}`;
+
+    const allowedIds = new Set(
+      options.map(option => Number(option.value))
+    );
+
+    const selected = new Set(
+      (await selectedIds(
+        prefix,
+        buildingType.id
+      )).filter(id => allowedIds.has(id))
+    );
+
+    const details = el(
+      'details',
+      'nilspe-ae-subgroup'
+    );
+
+    const summary = el('summary');
+
+    const title = el(
+      'strong',
+      '',
+      `${buildingType.id} – ${buildingType.name}`
+    );
+
+    const badge = el(
+      'span',
+      'label label-default'
+    );
+
+    summary.append(title, badge);
+
+    const content = el(
+      'div',
+      'nilspe-ae-subgroup-content'
+    );
+
+    const toolbar = el(
+      'div',
+      'nilspe-ae-toolbar'
+    );
+
+    const selectAll = el(
+      'button',
+      'btn btn-default btn-xs nilspe-ae-bulk',
+      'Alle anwählen'
+    );
+
+    const clearAll = el(
+      'button',
+      'btn btn-default btn-xs nilspe-ae-bulk',
+      'Alle abwählen'
+    );
+
+    selectAll.type = 'button';
+    clearAll.type = 'button';
+
+    const saveStatus = el(
+      'span',
+      'nilspe-ae-save'
+    );
+
+    const list = el('div');
+
+    let saveQueue = Promise.resolve();
+
+    function save() {
+      const snapshot = [...selected].sort(
+        (a, b) => a - b
+      );
+
+      saveStatus.textContent = 'Speichere ...';
+
+      saveQueue = saveQueue
+        .catch(() => {})
+        .then(() =>
+          GM.setValue(
+            storageKey,
+            JSON.stringify(snapshot)
+          )
+        )
+        .then(() => {
+          saveStatus.textContent = 'Gespeichert';
+        })
+        .catch(error => {
+          saveStatus.textContent =
+            'Speichern fehlgeschlagen';
+
+          console.error(
+            PREFIX,
+            'Speichern fehlgeschlagen:',
+            storageKey,
+            error
+          );
         });
-        field.append(input);
-        body.append(field);
+    }
+
+    function update() {
+      badge.textContent =
+        `${selected.size} / ${options.length} ausgewählt`;
+
+      badge.className = selected.size
+        ? 'label label-success'
+        : 'label label-default';
+
+      list.replaceChildren();
+
+      for (const option of options) {
+        const id = Number(option.value);
+        const active = selected.has(id);
+
+        const row = el(
+          'div',
+          'nilspe-ae-option'
+        );
+
+        row.classList.toggle('active', active);
+
+        const label = el(
+          'span',
+          'nilspe-ae-option-label',
+          `${option.name} (${id})`
+        );
+
+        const toggle = el(
+          'button',
+          'btn btn-xs nilspe-ae-toggle ' +
+            (active
+              ? 'btn-danger'
+              : 'btn-success'),
+          active ? '✕' : '✓'
+        );
+
+        toggle.type = 'button';
+
+        toggle.title = active
+          ? 'Erweiterung abwählen'
+          : 'Erweiterung auswählen';
+
+        function toggleSelection() {
+          if (selected.has(id)) {
+            selected.delete(id);
+          } else {
+            selected.add(id);
+          }
+
+          update();
+          save();
+        }
+
+        label.addEventListener(
+          'click',
+          toggleSelection
+        );
+
+        toggle.addEventListener(
+          'click',
+          toggleSelection
+        );
+
+        row.append(label, toggle);
+        list.append(row);
       }
     }
 
-    if (location.hash === `#${SETTINGS_IDENTIFIER}`) {
+    selectAll.addEventListener('click', () => {
+      selected.clear();
+
+      for (const option of options) {
+        selected.add(
+          Number(option.value)
+        );
+      }
+
+      update();
+      save();
+    });
+
+    clearAll.addEventListener('click', () => {
+      selected.clear();
+      update();
+      save();
+    });
+
+    toolbar.append(
+      selectAll,
+      clearAll,
+      saveStatus
+    );
+
+    content.append(toolbar, list);
+
+    details.append(summary, content);
+    parent.append(details);
+
+    update();
+  }
+
+  /*
+   * ==========================================
+   * ZAHLENFELDER
+   * ==========================================
+   */
+
+  async function createNumberSetting(
+    parent,
+    {
+      key,
+      label,
+      fallback,
+      min = 0,
+      max = 5000
+    }
+  ) {
+    const row = el(
+      'div',
+      'nilspe-ae-number'
+    );
+
+    const input = el(
+      'input',
+      'form-control input-sm'
+    );
+
+    input.type = 'number';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = '1';
+
+    input.value = String(
+      safeNumber(
+        await GM.getValue(
+          key,
+          fallback
+        ),
+        fallback,
+        min,
+        max
+      )
+    );
+
+    const caption = el(
+      'label',
+      '',
+      label
+    );
+
+    const status = el(
+      'span',
+      'nilspe-ae-save'
+    );
+
+    row.append(
+      input,
+      caption,
+      status
+    );
+
+    let saveQueue = Promise.resolve();
+
+    input.addEventListener('change', () => {
+      const value = safeNumber(
+        input.value,
+        fallback,
+        min,
+        max
+      );
+
+      input.value = String(value);
+      status.textContent = 'Speichere ...';
+
+      saveQueue = saveQueue
+        .catch(() => {})
+        .then(() => GM.setValue(key, value))
+        .then(() => {
+          status.textContent = 'Gespeichert';
+        })
+        .catch(error => {
+          status.textContent =
+            'Speichern fehlgeschlagen';
+
+          console.error(
+            PREFIX,
+            key,
+            error
+          );
+        });
+    });
+
+    parent.append(row);
+  }
+
+  /*
+   * ==========================================
+   * EINSTELLUNGSSEITE
+   * ==========================================
+   */
+
+  async function createSettings() {
+    if (
+      typeof waitForSettingsDom !== 'function' ||
+      typeof createSettingsPane !== 'function'
+    ) {
+      console.error(
+        PREFIX,
+        'NilsPe-Skriptbasis fehlt.'
+      );
+
+      return;
+    }
+
+    if (!await waitForSettingsDom()) {
+      return;
+    }
+
+    const { anchor, body } =
+      createSettingsPane(
+        SETTINGS_IDENTIFIER,
+        'De-/Activate Extensions'
+      );
+
+    injectSettingsStyles();
+
+    let rendered = false;
+    let rendering = false;
+
+    async function renderSettings() {
+      if (rendered || rendering) {
+        return;
+      }
+
+      rendering = true;
+
+      try {
+        const optionsByType =
+          await extensionOptions();
+
+        const activate = makeGroup(
+          'Erweiterungen aktivieren',
+          'Auswahl der Erweiterungen, die auf ' +
+          'den zugehörigen Gebäudetypen ' +
+          'aktiviert werden sollen.'
+        );
+
+        const deactivate = makeGroup(
+          'Erweiterungen deaktivieren',
+          'Auswahl der Erweiterungen, die auf ' +
+          'den zugehörigen Gebäudetypen ' +
+          'deaktiviert werden sollen.'
+        );
+
+        const flow = makeGroup(
+          'Ablauf',
+          'Die Geschwindigkeitseinstellungen ' +
+          'gelten für beide Aktionen.'
+        );
+
+        for (const buildingType of BUILDING_TYPES) {
+          const options = [
+            ...(
+              optionsByType.get(
+                buildingType.id
+              )?.values() ?? []
+            )
+          ].sort((a, b) =>
+            Number(a.value) - Number(b.value)
+          );
+
+          if (!options.length) {
+            continue;
+          }
+
+          await createExtensionSelection(
+            activate.content,
+            ACTIVATE_PREFIX,
+            buildingType,
+            options
+          );
+
+          await createExtensionSelection(
+            deactivate.content,
+            DEACTIVATE_PREFIX,
+            buildingType,
+            options
+          );
+        }
+
+        await createNumberSetting(
+          flow.content,
+          {
+            key: ACTION_DELAY_KEY,
+            label: 'Pause nach einer Umschaltung [ms]',
+            fallback: DEFAULT_ACTION_DELAY
+          }
+        );
+
+        await createNumberSetting(
+          flow.content,
+          {
+            key: BUILDING_DELAY_KEY,
+            label: 'Pause nach einem Gebäude [ms]',
+            fallback: DEFAULT_BUILDING_DELAY
+          }
+        );
+
+        /*
+         * Einheitliche Hauptüberschrift
+         * wie bei Delete Buildings.
+         *
+         * Normales h2 ohne Fettschrift.
+         * Beschreibung direkt darunter.
+         */
+
+        const title = el(
+          'h2',
+          '',
+          'De-/Activate Extensions'
+        );
+
+        const description = el(
+          'p',
+          'nilspe-ae-info',
+          'Erweiterungen auswählen und deren Aktivierung oder Deaktivierung konfigurieren.'
+        );
+
+        body.replaceChildren(
+          title,
+          description,
+          activate.details,
+          deactivate.details,
+          flow.details
+        );
+
+        rendered = true;
+
+        console.log(
+          PREFIX,
+          `Einstellungen v${VERSION} geladen`
+        );
+      } catch (error) {
+        console.error(
+          PREFIX,
+          'Einstellungsoberfläche fehlgeschlagen:',
+          error
+        );
+      } finally {
+        rendering = false;
+      }
+    }
+
+    anchor.addEventListener(
+      'click',
+      () => void renderSettings()
+    );
+
+    if (
+      location.hash ===
+      `#${SETTINGS_IDENTIFIER}`
+    ) {
       await renderSettings();
       anchor.click();
     }
   }
 
+  /*
+   * ==========================================
+   * UMSCHALT-URLS DER ERWEITERUNGEN
+   * ==========================================
+   */
+
   function csrfToken() {
-    return document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+    return document.querySelector(
+      'meta[name="csrf-token"]'
+    )?.content ?? '';
   }
 
   async function toggleUrls(buildingId) {
-    const response = await fetch(`/buildings/${buildingId}`, {
-      credentials: 'same-origin',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    });
+    const response = await fetch(
+      `/buildings/${buildingId}`,
+      {
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Gebaeudeseite HTTP ${response.status}`);
+      throw new Error(
+        `Gebäudeseite HTTP ${response.status}`
+      );
     }
 
-    const documentFromResponse = new DOMParser().parseFromString(
-      await response.text(),
-      'text/html'
-    );
+    const parsed = new DOMParser()
+      .parseFromString(
+        await response.text(),
+        'text/html'
+      );
+
     const urls = new Map();
 
-    for (const link of documentFromResponse.querySelectorAll(
-      'a[href*="/extension_ready/"]'
-    )) {
-      const href = link.getAttribute('href') ?? '';
-      const match = href.match(/\/extension_ready\/(\d+)/);
+    for (
+      const link of
+      parsed.querySelectorAll(
+        'a[href*="/extension_ready/"]'
+      )
+    ) {
+      const href =
+        link.getAttribute('href') ?? '';
 
-      if (match) {
-        urls.set(Number(match[1]), new URL(href, location.origin).href);
+      const match = href.match(
+        /\/extension_ready\/(\d+)/
+      );
+
+      if (!match) {
+        continue;
       }
+
+      urls.set(
+        Number(match[1]),
+        new URL(
+          href,
+          location.origin
+        ).href
+      );
     }
 
     return urls;
   }
 
+  /*
+   * ==========================================
+   * ERWEITERUNG UMSCHALTEN
+   * ==========================================
+   */
+
   async function toggleExtension(url) {
     const token = csrfToken();
 
     if (!token) {
-      throw new Error('CSRF-Token wurde nicht gefunden.');
+      throw new Error(
+        'CSRF-Token wurde nicht gefunden.'
+      );
     }
 
     const response = await fetch(url, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Content-Type':
+          'application/x-www-form-urlencoded; charset=UTF-8',
         'X-CSRF-Token': token,
         'X-Requested-With': 'XMLHttpRequest'
       },
@@ -503,117 +1224,254 @@
     });
 
     if (!response.ok) {
-      throw new Error(`Umschaltung HTTP ${response.status}`);
+      throw new Error(
+        `Umschaltung HTTP ${response.status}`
+      );
     }
   }
 
+  /*
+   * ==========================================
+   * FORTSCHRITTSANZEIGE
+   * ==========================================
+   */
+
   function ensureProgress() {
-    if (document.getElementById('nilspe-ae-progress')) {
+    if (
+      document.getElementById(
+        'nilspe-ae-progress'
+      )
+    ) {
       return;
     }
 
-    const style = document.createElement('style');
+    const style = el('style');
     style.id = 'nilspe-ae-style';
+
     style.textContent = `
-      #nilspe-ae-progress {position:fixed;left:0;right:0;bottom:0;z-index:2147483000;padding:9px 12px;border-top:1px solid #888;background:#333;color:#fff}
-      #nilspe-ae-progress-row {display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-      #nilspe-ae-statistics {display:flex;flex-wrap:wrap;gap:20px;margin-top:6px;font-size:12px}
-      #nilspe-ae-track {height:12px;margin-top:6px;overflow:hidden;border-radius:4px;background:#777}
-      #nilspe-ae-fill {height:100%;width:0;background:#5cb85c;transition:width .15s}
+      #nilspe-ae-progress {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2147483000;
+        padding: 9px 12px;
+        border-top: 1px solid #888;
+        background: #333;
+        color: #fff;
+      }
+
+      #nilspe-ae-progress-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      #nilspe-ae-statistics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        margin-top: 6px;
+        font-size: 12px;
+      }
+
+      #nilspe-ae-track {
+        height: 12px;
+        margin-top: 6px;
+        overflow: hidden;
+        border-radius: 4px;
+        background: #777;
+      }
+
+      #nilspe-ae-fill {
+        height: 100%;
+        width: 0;
+        background: #5cb85c;
+        transition: width .15s;
+      }
     `;
+
     document.head.append(style);
 
-    const container = document.createElement('div');
+    const container = el('div');
     container.id = 'nilspe-ae-progress';
-    const row = document.createElement('div');
+
+    const row = el('div');
     row.id = 'nilspe-ae-progress-row';
-    const stop = document.createElement('button');
+
+    const stop = el(
+      'button',
+      'btn btn-danger btn-xs',
+      'Abbrechen'
+    );
+
     stop.id = 'nilspe-ae-stop';
     stop.type = 'button';
-    stop.className = 'btn btn-danger btn-xs';
-    stop.textContent = 'Abbrechen';
+
     stop.addEventListener('click', () => {
+      if (!running) return;
+
       cancelled = true;
       stop.disabled = true;
-      document.getElementById('nilspe-ae-status').textContent =
-        'Abbruch – laufende Anfrage wird beendet...';
+
+      const status = document.getElementById(
+        'nilspe-ae-status'
+      );
+
+      if (status) {
+        status.textContent =
+          'Abbruch – laufende Anfragen werden beendet ...';
+      }
     });
-    const status = document.createElement('span');
+
+    const status = el(
+      'span',
+      'label label-info',
+      'Bereit'
+    );
+
     status.id = 'nilspe-ae-status';
-    status.className = 'label label-info';
-    status.textContent = 'Bereit';
-    const close = document.createElement('button');
+
+    const close = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Schließen'
+    );
+
     close.id = 'nilspe-ae-close';
     close.type = 'button';
-    close.className = 'btn btn-default btn-xs';
-    close.textContent = 'Schließen';
     close.disabled = true;
+
     close.addEventListener('click', () => {
       if (running) return;
       container.remove();
-      style.remove();
     });
-    row.append(stop, status, close);
-    const statistics = document.createElement('div');
+
+    const statistics = el('div');
     statistics.id = 'nilspe-ae-statistics';
-    const track = document.createElement('div');
+
+    const track = el('div');
     track.id = 'nilspe-ae-track';
-    const fill = document.createElement('div');
+
+    const fill = el('div');
     fill.id = 'nilspe-ae-fill';
+
     track.append(fill);
-    container.append(row, statistics, track);
+    row.append(stop, status, close);
+
+    container.append(
+      row,
+      statistics,
+      track
+    );
+
     document.body.append(container);
   }
 
-  function setProgress(message, completed = 0, errors = 0, total = 0, type = 'info') {
+  function setProgress(
+    message,
+    completed = 0,
+    errors = 0,
+    total = 0,
+    type = 'info'
+  ) {
     ensureProgress();
-    const status = document.getElementById('nilspe-ae-status');
-    const fill = document.getElementById('nilspe-ae-fill');
+
+    const status = document.getElementById(
+      'nilspe-ae-status'
+    );
+
+    const fill = document.getElementById(
+      'nilspe-ae-fill'
+    );
+
     status.className = `label label-${type}`;
     status.textContent = message;
+
     fill.style.width = total > 0
-      ? `${Math.min(100, completed / total * 100)}%` : '0%';
+      ? `${Math.min(
+          100,
+          completed / total * 100
+        )}%`
+      : '0%';
   }
 
-  function updateStatistics(changed, completed, errors, total) {
-    const statistics = document.getElementById('nilspe-ae-statistics');
+  function updateStatistics(
+    changed,
+    completed,
+    errors,
+    total
+  ) {
+    const statistics = document.getElementById(
+      'nilspe-ae-statistics'
+    );
+
     if (!statistics) return;
-    const format = number => Number(number).toLocaleString('de-DE');
+
     statistics.replaceChildren();
-    for (const entry of [
-      `Umgeschaltete Erweiterungen: ${format(changed)}`,
-      `Fehler: ${format(errors)}`,
-      `Gebäude: ${format(completed)}/${format(total)}`
+
+    for (const item of [
+      `Umgeschaltete Erweiterungen: ${formatNumber(changed)}`,
+      `Fehler: ${formatNumber(errors)}`,
+      `Gebäude: ${formatNumber(completed)}/${formatNumber(total)}`
     ]) {
-      const span = document.createElement('span');
-      span.textContent = entry;
-      statistics.append(span);
+      statistics.append(
+        el('span', '', item)
+      );
     }
   }
 
   function finishProgress() {
-    const stop = document.getElementById('nilspe-ae-stop');
-    const close = document.getElementById('nilspe-ae-close');
+    const stop = document.getElementById(
+      'nilspe-ae-stop'
+    );
+
+    const close = document.getElementById(
+      'nilspe-ae-close'
+    );
+
     if (stop) stop.disabled = true;
     if (close) close.disabled = false;
   }
+
+  /*
+   * ==========================================
+   * ERWEITERUNGEN PRO GEBÄUDE
+   * ==========================================
+   */
 
   async function configurationFor(
     building,
     desiredState,
     selectedExtensionIds = null
   ) {
-    const prefix = desiredState ? ACTIVATE_PREFIX : DEACTIVATE_PREFIX;
-    const selected = selectedExtensionIds ?? new Set(
-      await selectedIds(prefix, building.building_type)
-    );
+    const prefix = desiredState
+      ? ACTIVATE_PREFIX
+      : DEACTIVATE_PREFIX;
 
-    return building.extensions.filter(extension =>
-      selected.has(extension.type_id) &&
-      extension.available !== false &&
-      extension.enabled !== desiredState
+    const selected =
+      selectedExtensionIds ??
+      new Set(
+        await selectedIds(
+          prefix,
+          building.building_type
+        )
+      );
+
+    return building.extensions.filter(
+      extension =>
+        selected.has(extension.type_id) &&
+        extension.available !== false &&
+        extension.enabled !== desiredState
     );
   }
+
+  /*
+   * ==========================================
+   * EIN GEBÄUDE ABARBEITEN
+   * ==========================================
+   */
 
   async function processBuilding(
     building,
@@ -621,10 +1479,14 @@
     actionDelay,
     configuredExtensions = null
   ) {
-    const extensions = configuredExtensions ??
-      await configurationFor(building, desiredState);
+    const extensions =
+      configuredExtensions ??
+      await configurationFor(
+        building,
+        desiredState
+      );
 
-    if (extensions.length === 0) {
+    if (!extensions.length) {
       return 0;
     }
 
@@ -636,61 +1498,140 @@
         break;
       }
 
-      const url = urls.get(extension.type_id);
+      const url = urls.get(
+        extension.type_id
+      );
 
       if (!url) {
         console.warn(
-          '[De-/Activate Extensions] Keine Umschalt-URL:',
+          PREFIX,
+          'Keine Umschalt-URL:',
           building.id,
           extension.type_id
         );
+
         continue;
       }
 
       await toggleExtension(url);
       changed++;
-      await sleep(actionDelay);
+
+      if (
+        !cancelled &&
+        actionDelay > 0
+      ) {
+        await sleep(actionDelay);
+      }
     }
 
     return changed;
   }
 
-  async function run(desiredState, button) {
+  /*
+   * ==========================================
+   * HAUPTABLAUF
+   * ==========================================
+   */
+
+  async function run(desiredState) {
     if (running) {
       return;
     }
 
     running = true;
     cancelled = false;
-    button.disabled = true;
+
+    for (const button of buttons) {
+      button.disabled = true;
+    }
+
     ensureProgress();
-    document.getElementById('nilspe-ae-stop').disabled = false;
-    document.getElementById('nilspe-ae-close').disabled = true;
+
+    const stop = document.getElementById(
+      'nilspe-ae-stop'
+    );
+
+    const close = document.getElementById(
+      'nilspe-ae-close'
+    );
+
+    stop.disabled = false;
+    close.disabled = true;
+
+    let completed = 0;
+    let errors = 0;
+    let changed = 0;
+    let total = 0;
+
+    updateStatistics(0, 0, 0, 0);
 
     try {
       const dispatchCenterId = Number(
-        location.pathname.match(/^\/buildings\/(\d+)/)?.[1]
+        location.pathname.match(
+          /^\/buildings\/(\d+)/
+        )?.[1]
       );
-      const actionDelay = Math.max(
+
+      if (
+        !Number.isSafeInteger(dispatchCenterId) ||
+        dispatchCenterId <= 0
+      ) {
+        throw new Error(
+          'Ungültige Leitstellen-ID.'
+        );
+      }
+
+      const actionDelay = safeNumber(
+        await GM.getValue(
+          ACTION_DELAY_KEY,
+          DEFAULT_ACTION_DELAY
+        ),
+        DEFAULT_ACTION_DELAY,
         0,
-        Number(await GM.getValue(ACTION_DELAY_KEY, DEFAULT_ACTION_DELAY))
+        5000
       );
-      const buildingDelay = Math.max(
+
+      const buildingDelay = safeNumber(
+        await GM.getValue(
+          BUILDING_DELAY_KEY,
+          DEFAULT_BUILDING_DELAY
+        ),
+        DEFAULT_BUILDING_DELAY,
         0,
-        Number(await GM.getValue(BUILDING_DELAY_KEY, DEFAULT_BUILDING_DELAY))
+        5000
       );
-      setProgress('Gebaeude werden geladen ...');
-      const buildings = await loadBuildings(dispatchCenterId);
-      const prefix = desiredState ? ACTIVATE_PREFIX : DEACTIVATE_PREFIX;
+
+      setProgress(
+        'Gebäude werden geladen ...'
+      );
+
+      const buildings = await loadBuildings(
+        dispatchCenterId
+      );
+
+      const prefix = desiredState
+        ? ACTIVATE_PREFIX
+        : DEACTIVATE_PREFIX;
+
       const selectedByBuildingType = new Map();
 
       for (const building of buildings) {
-        const buildingType = Number(building.building_type);
+        const buildingType =
+          building.building_type;
 
-        if (!selectedByBuildingType.has(buildingType)) {
+        if (
+          !selectedByBuildingType.has(
+            buildingType
+          )
+        ) {
           selectedByBuildingType.set(
             buildingType,
-            new Set(await selectedIds(prefix, buildingType))
+            new Set(
+              await selectedIds(
+                prefix,
+                buildingType
+              )
+            )
           );
         }
       }
@@ -698,66 +1639,96 @@
       const relevant = [];
 
       for (const building of buildings) {
-        const extensions = await configurationFor(
-          building,
-          desiredState,
-          selectedByBuildingType.get(Number(building.building_type))
-        );
+        const extensions =
+          await configurationFor(
+            building,
+            desiredState,
+            selectedByBuildingType.get(
+              building.building_type
+            )
+          );
 
         if (extensions.length > 0) {
-          relevant.push({ building, extensions });
+          relevant.push({
+            building,
+            extensions
+          });
         }
       }
 
-      if (relevant.length === 0) {
-        setProgress('Keine Umschaltung erforderlich', 0, 0, 0, 'success');
+      total = relevant.length;
+
+      if (!total) {
+        setProgress(
+          'Keine Umschaltung erforderlich',
+          0, 0, 0, 'success'
+        );
+
         updateStatistics(0, 0, 0, 0);
         return;
       }
 
-      let completed = 0;
-      let errors = 0;
-      let changed = 0;
-      updateStatistics(0, 0, 0, relevant.length);
+      updateStatistics(
+        0,
+        0,
+        0,
+        total
+      );
 
       await runWithConcurrency(
         relevant,
+
         async ({ building, extensions }) => {
           if (cancelled) return;
+
           setProgress(
-            `${completed}/${relevant.length}: ${building.caption}`,
+            `${completed}/${total}: ${building.caption}`,
             completed,
             errors,
-            relevant.length
+            total
           );
 
           try {
-            const buildingChanges = await processBuilding(
-              building,
-              desiredState,
-              actionDelay,
-              extensions
-            );
+            const buildingChanges =
+              await processBuilding(
+                building,
+                desiredState,
+                actionDelay,
+                extensions
+              );
+
             changed += buildingChanges;
+
           } catch (error) {
             errors++;
+
             console.error(
-              '[De-/Activate Extensions] Gebaeude fehlgeschlagen:',
+              PREFIX,
+              'Gebäude fehlgeschlagen:',
               building.id,
               error
             );
           }
 
           completed++;
-          updateStatistics(changed, completed, errors, relevant.length);
-          setProgress(
-            `${completed}/${relevant.length} Gebaeude, ${changed} umgeschaltet`,
+
+          updateStatistics(
+            changed,
             completed,
             errors,
-            relevant.length,
-            errors ? 'warning' : 'success'
+            total
+          );
+
+          setProgress(
+            `${completed}/${total} Gebäude, ` +
+            `${changed} umgeschaltet`,
+            completed,
+            errors,
+            total,
+            errors ? 'warning' : 'info'
           );
         },
+
         {
           concurrency: 3,
           delay: buildingDelay,
@@ -766,86 +1737,190 @@
       );
 
       if (cancelled) {
-        setProgress('Abgebrochen', completed, errors, relevant.length, 'warning');
-        return;
+        setProgress(
+          `Abgebrochen: ${changed} umgeschaltet, ` +
+          `${errors} Fehler, ${total - completed} Gebäude offen`,
+          completed,
+          errors,
+          total,
+          'warning'
+        );
+      } else {
+        setProgress(
+          `Fertig: ${changed} umgeschaltet, ` +
+          `${errors} Fehler`,
+          completed,
+          errors,
+          total,
+          errors ? 'warning' : 'success'
+        );
       }
 
+    } catch (error) {
+      console.error(
+        PREFIX,
+        'Lauf fehlgeschlagen:',
+        error
+      );
+
       setProgress(
-        `Fertig: ${changed} umgeschaltet, ${errors} Fehler`,
+        `Fehler: ${error.message ?? error}`,
         completed,
         errors,
-        relevant.length,
-        errors ? 'warning' : 'success'
+        total,
+        'danger'
       );
-    } catch (error) {
-      console.error('[De-/Activate Extensions] Lauf fehlgeschlagen:', error);
-      setProgress(`Fehler: ${error.message ?? error}`, 0, 0, 0, 'danger');
+
     } finally {
       running = false;
-      button.disabled = false;
+
+      for (const button of buttons) {
+        button.disabled = false;
+      }
+
       finishProgress();
     }
   }
 
+  /*
+   * ==========================================
+   * BUTTONS IN DER LEITSTELLE
+   * ==========================================
+   */
+
   function settingsButton() {
-    const button = document.createElement('a');
-    button.className = 'btn btn-default btn-xs';
-    button.href = `/settings/index#${SETTINGS_IDENTIFIER}`;
+    const button = el(
+      'a',
+      'btn btn-default btn-xs'
+    );
+
+    button.href =
+      `/settings/index#${SETTINGS_IDENTIFIER}`;
+
     button.target = '_blank';
     button.title = 'Einstellungen';
-    const icon = document.createElement('span');
-    icon.className = 'glyphicon glyphicon-cog';
-    button.append(icon);
+
+    button.append(
+      el(
+        'span',
+        'glyphicon glyphicon-cog'
+      )
+    );
+
     return button;
   }
 
   function addButtons() {
-    const heading = document.querySelector('h1[building_type]');
+    const heading = document.querySelector(
+      'h1[building_type]'
+    );
 
     if (
-      Number(heading?.getAttribute('building_type')) !== 7 ||
-      document.getElementById('nilspe-ae-buttons')
+      Number(
+        heading?.getAttribute(
+          'building_type'
+        )
+      ) !== 7 ||
+      document.getElementById(
+        'nilspe-ae-buttons'
+      )
     ) {
       return;
     }
 
-    const details = document.querySelector('.building-title ~ dl.dl-horizontal');
+    const details = document.querySelector(
+      '.building-title ~ dl.dl-horizontal'
+    );
 
     if (!details) {
       return;
     }
 
-    const term = document.createElement('dt');
-    const strong = document.createElement('strong');
-    strong.textContent = 'Erweiterungen:';
-    term.append(strong);
-    const description = document.createElement('dd');
-    const group = document.createElement('div');
+    const term = el('dt');
+
+    term.append(
+      el('strong', '', 'Erweiterungen:')
+    );
+
+    const description = el('dd');
+
+    const group = el(
+      'div',
+      'btn-group'
+    );
+
     group.id = 'nilspe-ae-buttons';
-    group.className = 'btn-group';
-    const activate = document.createElement('button');
+
+    const activate = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Aktivieren'
+    );
+
+    const deactivate = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Deaktivieren'
+    );
+
     activate.type = 'button';
-    activate.className = 'btn btn-default btn-xs';
-    activate.textContent = 'Aktivieren';
-    activate.addEventListener('click', () => run(true, activate));
-    const deactivate = document.createElement('button');
     deactivate.type = 'button';
-    deactivate.className = 'btn btn-default btn-xs';
-    deactivate.textContent = 'Deaktivieren';
-    deactivate.addEventListener('click', () => run(false, deactivate));
-    group.append(activate, deactivate, settingsButton());
+
+    buttons = [
+      activate,
+      deactivate
+    ];
+
+    activate.addEventListener(
+      'click',
+      () => void run(true)
+    );
+
+    deactivate.addEventListener(
+      'click',
+      () => void run(false)
+    );
+
+    group.append(
+      activate,
+      deactivate,
+      settingsButton()
+    );
+
     description.append(group);
-    details.append(term, description);
+
+    details.append(
+      term,
+      description
+    );
   }
 
-  if (location.pathname.startsWith('/settings/index')) {
+  /*
+   * ==========================================
+   * INITIALISIERUNG
+   * ==========================================
+   */
+
+  if (
+    location.pathname.startsWith(
+      '/settings/index'
+    )
+  ) {
     await createSettings();
   } else {
     addButtons();
-    new MutationObserver(addButtons).observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-})();
 
+    new MutationObserver(addButtons).observe(
+      document.body,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+  }
+
+  console.log(
+    PREFIX,
+    `Version ${VERSION} geladen`
+  );
+})();
