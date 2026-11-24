@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Extensions
 // @namespace    NilsPe.autobuy.extensions
-// @version      1.2.6
+// @version      1.2.7
 // @description  Erweiterungskauf mit individueller Reihenfolge und automatischer Nachprüfung
 // @author       NilsPe
 // @license      MIT
@@ -24,7 +24,7 @@
 (async function () {
     'use strict';
 
-    const VERSION = '1.2.6';
+    const VERSION = '1.2.7';
     const PREFIX = `[Autobuy Extensions ${VERSION}]`;
     const SETTINGS_IDENTIFIER = 'nilspe_autobuy_extensions';
     const EXTENSION_KEY_PREFIX = 'nilspe_abe_extensions_';
@@ -503,6 +503,22 @@
                 flex-wrap: wrap;
                 gap: 5px;
                 margin-bottom: 8px;
+            }
+
+            .nilspe-abe-toolbar > button:nth-child(-n+2) {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                box-sizing: border-box;
+                flex: 0 0 110px;
+                width: 110px;
+                height: 28px;
+                margin: 0;
+                padding: 2px 6px;
+                vertical-align: middle;
+                white-space: nowrap;
+                font-size: 13px;
+                line-height: 1;
             }
 
             .nilspe-abe-order-row {
@@ -2661,3 +2677,4 @@
     log('Geladen – sequenzieller Kaufmodus.');
 
 })();
+
