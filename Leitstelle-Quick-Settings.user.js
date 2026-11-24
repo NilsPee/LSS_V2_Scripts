@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Leitstelle Quick Settings
 // @namespace    NilsPe.leitstelle.quick.settings
-// @version      1.2.0
+// @version      1.3.0
 // @description  Zeigt wichtige Leitstellen-Einstellungen direkt auf der Leitstellen-Hauptseite und in der Gebäudeliste an
 // @author       NilsPe
 // @license      MIT
@@ -19,6 +19,9 @@
 (function () {
     'use strict';
 
+    const VERSION = '1.3.0';
+    const PREFIX = '[Leitstelle Quick Settings]';
+
     const PANEL_ID = 'nilspe-leitstelle-quick-settings';
 
     const FIELD_ACTIVE = 'building[active]';
@@ -29,18 +32,62 @@
 
     addStyles();
 
-    const pathMatch = location.pathname.match(/^\/buildings\/(\d+)\/?$/);
+    const pathMatch = location.pathname.match(
+        /^\/buildings\/(\d+)\/?$/
+    );
 
     if (pathMatch) {
         initBuildingPage(pathMatch[1]).catch(error => {
-            console.error('[Leitstelle Quick Settings]', error);
+            console.error(PREFIX, error);
         });
     }
 
     initBuildingList();
 
     // ============================================================
-    // Änderungsprüfung
+    // HELFER
+    // ============================================================
+
+    function el(tag, className = '', text = '') {
+        const element = document.createElement(tag);
+
+        if (className) {
+            element.className = className;
+        }
+
+        if (text) {
+            element.textContent = text;
+        }
+
+        return element;
+    }
+
+    function makeCheckbox(name, labelText, title, checked) {
+        const label = el(
+            'label',
+            'nilspe-lqs-option'
+        );
+
+        label.title = title;
+
+        const checkbox = el('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = name;
+        checkbox.checked = Boolean(checked);
+
+        const text = el(
+            'span',
+            'nilspe-lqs-option-text',
+            labelText
+        );
+
+        label.append(checkbox, text);
+
+        return label;
+    }
+
+    // ============================================================
+    // ÄNDERUNGEN ERKENNEN
     // ============================================================
 
     function getControlValues(controls) {
@@ -48,6 +95,7 @@
             dispatchDisabled: controls.querySelector(
                 '[name="quick_active"]'
             ).checked,
+
             ownMissions: controls.querySelector(
                 '[name="quick_own_missions"]'
             ).checked
@@ -61,10 +109,13 @@
 
         if (!button) return;
 
-        // Der zuletzt erfolgreich gespeicherte Zustand.
         let savedValues = {
-            dispatchDisabled: Boolean(initialValues.dispatchDisabled),
-            ownMissions: Boolean(initialValues.ownMissions)
+            dispatchDisabled: Boolean(
+                initialValues.dispatchDisabled
+            ),
+            ownMissions: Boolean(
+                initialValues.ownMissions
+            )
         };
 
         let saving = false;
@@ -73,27 +124,41 @@
             const current = getControlValues(controls);
 
             return (
-                current.dispatchDisabled !== savedValues.dispatchDisabled ||
-                current.ownMissions !== savedValues.ownMissions
+                current.dispatchDisabled !==
+                    savedValues.dispatchDisabled ||
+                current.ownMissions !==
+                    savedValues.ownMissions
             );
         }
 
         function updateButton() {
-            // Während eines Speichervorgangs bleibt
-            // der Button mit "Speichere…" sichtbar.
+            const changed = isChanged();
+
             button.classList.toggle(
                 'nilspe-lqs-save-hidden',
-                !saving && !isChanged()
+                !saving && !changed
+            );
+
+            controls.classList.toggle(
+                'nilspe-lqs-changed',
+                !saving && changed
+            );
+
+            controls.classList.toggle(
+                'nilspe-lqs-saving',
+                saving
             );
         }
 
         controls.querySelectorAll(
             '[name="quick_active"], [name="quick_own_missions"]'
         ).forEach(checkbox => {
-            checkbox.addEventListener('change', updateButton);
+            checkbox.addEventListener(
+                'change',
+                updateButton
+            );
         });
 
-        // Schnittstelle für saveSettings().
         controls.nilspeQuickSettingsState = {
             hasChanges: isChanged,
 
@@ -104,7 +169,9 @@
 
             finishSaving(success, submittedValues) {
                 if (success) {
-                    savedValues = { ...submittedValues };
+                    savedValues = {
+                        ...submittedValues
+                    };
                 }
 
                 saving = false;
@@ -112,13 +179,11 @@
             }
         };
 
-        // Beim Laden immer zunächst ausblenden,
-        // solange keine Änderung vorgenommen wurde.
         updateButton();
     }
 
     // ============================================================
-    // Einzelne Leitstellen-Seite
+    // EINZELNE LEITSTELLENSEITE
     // ============================================================
 
     async function initBuildingPage(buildingId) {
@@ -126,16 +191,21 @@
             return;
         }
 
-        const heading = document.querySelector('h1[building_type]');
+        const heading = document.querySelector(
+            'h1[building_type]'
+        );
 
         if (
-            Number(heading?.getAttribute('building_type')) !==
-            LEITSTELLE_TYPE_ID
+            Number(
+                heading?.getAttribute('building_type')
+            ) !== LEITSTELLE_TYPE_ID
         ) {
             return;
         }
 
-        const editUrl = `${location.origin}/buildings/${buildingId}/edit`;
+        const editUrl =
+            `${location.origin}/buildings/${buildingId}/edit`;
+
         const editDocument = await fetchEditDocument(editUrl);
         const editForm = findSettingsForm(editDocument);
 
@@ -149,7 +219,9 @@
             `input[type="checkbox"][name="${FIELD_OWN_MISSIONS}"]`
         );
 
-        if (!activeCheckbox || !ownMissionsCheckbox) return;
+        if (!activeCheckbox || !ownMissionsCheckbox) {
+            return;
+        }
 
         const values = {
             dispatchDisabled: activeCheckbox.checked,
@@ -167,7 +239,7 @@
             .addEventListener('submit', event => {
                 event.preventDefault();
 
-                saveSettings(
+                void saveSettings(
                     editForm,
                     row.description,
                     true
@@ -176,11 +248,13 @@
     }
 
     // ============================================================
-    // Gebäudeliste / Leitstellenliste
+    // LEITSTELLENLISTE
     // ============================================================
 
     function initBuildingList() {
-        const buildingList = document.querySelector('#building_list');
+        const buildingList = document.querySelector(
+            '#building_list'
+        );
 
         if (!buildingList) return;
 
@@ -201,16 +275,18 @@
             ...document.querySelectorAll(
                 `#building_list > li[building_type_id="${LEITSTELLE_TYPE_ID}"]`
             )
-        ].filter(li => !li.dataset.nilspeQuickSettings);
+        ].filter(li =>
+            !li.dataset.nilspeQuickSettings
+        );
 
         if (!leitstellen.length) return;
 
-        leitstellen.forEach(li => {
+        for (const li of leitstellen) {
             li.dataset.nilspeQuickSettings = 'loading';
             createListPlaceholder(li);
-        });
+        }
 
-        runPool(
+        void runPool(
             leitstellen,
             MAX_PARALLEL,
             loadListEntry
@@ -218,16 +294,33 @@
     }
 
     function createListPlaceholder(li) {
-        const caption = li.querySelector('.building_list_caption');
+        const caption = li.querySelector(
+            '.building_list_caption'
+        );
 
         if (!caption) return;
 
-        const container = document.createElement('span');
+        /*
+         * Der bestehende Leitstellenname
+         * bleibt an seinem Platz.
+         *
+         * Die zusätzlichen Steuerelemente
+         * werden als kompakte Gruppe
+         * daneben angezeigt.
+         */
 
-        container.className =
-            'nilspe-lqs-list nilspe-lqs-loading';
+        const container = el(
+            'span',
+            'nilspe-lqs-list nilspe-lqs-loading',
+            'Lade…'
+        );
 
-        container.textContent = 'Lade Einstellungen…';
+        container.title =
+            'Leitstellen-Einstellungen werden geladen';
+
+        caption.classList.add(
+            'nilspe-lqs-caption'
+        );
 
         caption.append(container);
     }
@@ -235,22 +328,36 @@
     async function loadListEntry(li) {
         const buildingId = getBuildingId(li);
 
+        const container = li.querySelector(
+            '.nilspe-lqs-list'
+        );
+
         if (!buildingId) {
             li.dataset.nilspeQuickSettings = 'error';
+
+            if (container) {
+                showLoadError(container);
+            }
+
             return;
         }
-
-        const container = li.querySelector('.nilspe-lqs-list');
 
         try {
             const editUrl =
                 `${location.origin}/buildings/${buildingId}/edit`;
 
-            const editDocument = await fetchEditDocument(editUrl);
-            const editForm = findSettingsForm(editDocument);
+            const editDocument = await fetchEditDocument(
+                editUrl
+            );
+
+            const editForm = findSettingsForm(
+                editDocument
+            );
 
             if (!editForm) {
-                throw new Error('Einstellungsformular nicht gefunden');
+                throw new Error(
+                    'Einstellungsformular nicht gefunden'
+                );
             }
 
             const activeCheckbox = editForm.querySelector(
@@ -262,7 +369,13 @@
             );
 
             if (!activeCheckbox || !ownMissionsCheckbox) {
-                throw new Error('Checkboxen nicht gefunden');
+                throw new Error(
+                    'Checkboxen nicht gefunden'
+                );
+            }
+
+            if (!container?.isConnected) {
+                return;
             }
 
             createListControls(
@@ -278,7 +391,7 @@
 
         } catch (error) {
             console.error(
-                '[Leitstelle Quick Settings]',
+                PREFIX,
                 buildingId,
                 error
             );
@@ -286,63 +399,82 @@
             li.dataset.nilspeQuickSettings = 'error';
 
             if (container) {
-                container.classList.remove('nilspe-lqs-loading');
-                container.classList.add('nilspe-lqs-error');
-                container.textContent = 'Fehler';
+                showLoadError(container);
             }
         }
     }
 
+    function showLoadError(container) {
+        container.className =
+            'nilspe-lqs-list nilspe-lqs-error';
+
+        container.textContent = 'Fehler';
+
+        container.title =
+            'Leitstellen-Einstellungen konnten nicht geladen werden';
+    }
+
     function createListControls(container, editForm, values) {
         container.className = 'nilspe-lqs-list';
+        container.replaceChildren();
 
-        container.innerHTML = `
-            <label
-                class="nilspe-lqs-list-option"
-                title="Leitstelle deaktivieren"
-            >
-                <input type="checkbox" name="quick_active">
-                <span>LS aus</span>
-            </label>
+        const active = makeCheckbox(
+            'quick_active',
+            'LS aus',
+            'Leitstelle deaktivieren',
+            values.dispatchDisabled
+        );
 
-            <label
-                class="nilspe-lqs-list-option"
-                title="Eigener Einsatzbereich"
-            >
-                <input type="checkbox" name="quick_own_missions">
-                <span>Eig. Bereich</span>
-            </label>
+        const ownMissions = makeCheckbox(
+            'quick_own_missions',
+            'Eig. Bereich',
+            'Eigener Einsatzbereich',
+            values.ownMissions
+        );
 
-            <button
-                type="button"
-                class="btn btn-success btn-xs nilspe-lqs-save"
-            >
-                Speichern
-            </button>
+        const saveButton = el(
+            'button',
+            'btn btn-success btn-xs nilspe-lqs-save',
+            'Speichern'
+        );
 
-            <span class="nilspe-lqs-status"></span>
-        `;
+        saveButton.type = 'button';
 
-        container.querySelector(
-            '[name="quick_active"]'
-        ).checked = values.dispatchDisabled;
+        const status = el(
+            'span',
+            'nilspe-lqs-status'
+        );
 
-        container.querySelector(
-            '[name="quick_own_missions"]'
-        ).checked = values.ownMissions;
+        status.setAttribute(
+            'aria-live',
+            'polite'
+        );
 
-        // NEU: Änderungen je Leitstelle überwachen.
+        container.append(
+            active,
+            ownMissions,
+            saveButton,
+            status
+        );
+
         watchChanges(container, values);
 
-        container.querySelector(
-            '.nilspe-lqs-save'
-        ).addEventListener('click', () => {
-            saveSettings(editForm, container, false);
-        });
+        saveButton.addEventListener(
+            'click',
+            () => {
+                void saveSettings(
+                    editForm,
+                    container,
+                    false
+                );
+            }
+        );
     }
 
     function getBuildingId(li) {
-        const match = li.id?.match(/^building_list_(\d+)$/);
+        const match = li.id?.match(
+            /^building_list_(\d+)$/
+        );
 
         if (match) return match[1];
 
@@ -358,10 +490,14 @@
     }
 
     // ============================================================
-    // Speichern
+    // SPEICHERN
     // ============================================================
 
-    async function saveSettings(editForm, controls, reloadAfterSave) {
+    async function saveSettings(
+        editForm,
+        controls,
+        reloadAfterSave
+    ) {
         const submitButton = controls.querySelector(
             'button[type="submit"], .nilspe-lqs-save'
         );
@@ -378,22 +514,27 @@
             '[data-quick-error]'
         );
 
-        const state = controls.nilspeQuickSettingsState;
+        const state =
+            controls.nilspeQuickSettingsState;
 
-        // Unveränderte Werte nicht erneut speichern.
         if (state && !state.hasChanges()) {
             return;
         }
 
-        if (submitButton.disabled) return;
+        if (!submitButton || submitButton.disabled) {
+            return;
+        }
 
-        const submittedValues = getControlValues(controls);
+        const submittedValues = getControlValues(
+            controls
+        );
 
         if (successAlert) setAlert(successAlert, '');
         if (errorAlert) setAlert(errorAlert, '');
 
         if (status) {
             status.textContent = '';
+            status.className = 'nilspe-lqs-status';
         }
 
         state?.startSaving();
@@ -403,11 +544,13 @@
         const oldText = submitButton.textContent;
         submitButton.textContent = 'Speichere…';
 
-        // Während des Requests keine weiteren Änderungen
-        // an den beiden Checkboxen zulassen.
         const checkboxes = [
-            controls.querySelector('[name="quick_active"]'),
-            controls.querySelector('[name="quick_own_missions"]')
+            controls.querySelector(
+                '[name="quick_active"]'
+            ),
+            controls.querySelector(
+                '[name="quick_own_missions"]'
+            )
         ];
 
         checkboxes.forEach(input => {
@@ -426,31 +569,49 @@
             );
 
             if (!activeInput || !missionsInput) {
-                throw new Error('Einstellungsfelder nicht gefunden.');
+                throw new Error(
+                    'Einstellungsfelder nicht gefunden.'
+                );
             }
 
-            activeInput.checked = submittedValues.dispatchDisabled;
-            missionsInput.checked = submittedValues.ownMissions;
+            activeInput.checked =
+                submittedValues.dispatchDisabled;
+
+            missionsInput.checked =
+                submittedValues.ownMissions;
 
             const action = new URL(
-                editForm.getAttribute('action') || location.pathname,
+                editForm.getAttribute('action') ||
+                location.pathname,
                 location.origin
             );
 
             const method = (
-                editForm.getAttribute('method') || 'post'
+                editForm.getAttribute('method') ||
+                'post'
             ).toUpperCase();
 
-            const response = await fetch(action.href, {
-                method,
-                credentials: 'same-origin',
-                body: new FormData(editForm),
-                headers: {
-                    Accept:
-                        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-                },
-                redirect: 'follow'
-            });
+            /*
+             * Bestehendes Speichervorgehen:
+             * vollständiges Edit-Formular senden.
+             *
+             * Nur die beiden angezeigten
+             * Checkboxen werden verändert.
+             */
+
+            const response = await fetch(
+                action.href,
+                {
+                    method,
+                    credentials: 'same-origin',
+                    body: new FormData(editForm),
+                    headers: {
+                        Accept:
+                            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    },
+                    redirect: 'follow'
+                }
+            );
 
             if (!response.ok) {
                 throw new Error(
@@ -461,14 +622,18 @@
             success = true;
 
             if (successAlert) {
-                setAlert(successAlert, 'Gespeichert.');
+                setAlert(
+                    successAlert,
+                    'Gespeichert.'
+                );
             }
 
             if (status) {
                 status.className =
-                    'nilspe-lqs-status text-success';
+                    'nilspe-lqs-status nilspe-lqs-status-success';
 
                 status.textContent = '✓';
+                status.title = 'Gespeichert';
             }
 
             if (reloadAfterSave) {
@@ -478,7 +643,9 @@
                 );
             } else {
                 window.setTimeout(() => {
-                    if (status?.textContent === '✓') {
+                    if (
+                        status?.textContent === '✓'
+                    ) {
                         status.textContent = '';
                     }
                 }, 1500);
@@ -486,22 +653,26 @@
 
         } catch (error) {
             console.error(
-                '[Leitstelle Quick Settings]',
+                PREFIX,
                 error
             );
 
             if (errorAlert) {
                 setAlert(
                     errorAlert,
-                    error.message || 'Speichern fehlgeschlagen.'
+                    error.message ||
+                    'Speichern fehlgeschlagen.'
                 );
             }
 
             if (status) {
                 status.className =
-                    'nilspe-lqs-status text-danger';
+                    'nilspe-lqs-status nilspe-lqs-status-error';
 
                 status.textContent = '✕';
+                status.title =
+                    error.message ||
+                    'Speichern fehlgeschlagen';
             }
 
         } finally {
@@ -512,23 +683,27 @@
             submitButton.disabled = false;
             submitButton.textContent = oldText;
 
-            // NEU: Nur bei Erfolg den gespeicherten
-            // Vergleichszustand aktualisieren.
-            state?.finishSaving(success, submittedValues);
+            state?.finishSaving(
+                success,
+                submittedValues
+            );
         }
     }
 
     // ============================================================
-    // Hilfsfunktionen
+    // EDIT-SEITE LADEN
     // ============================================================
 
     async function fetchEditDocument(editUrl) {
-        const response = await fetch(editUrl, {
-            credentials: 'same-origin',
-            headers: {
-                Accept: 'text/html'
+        const response = await fetch(
+            editUrl,
+            {
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'text/html'
+                }
             }
-        });
+        );
 
         if (!response.ok) {
             throw new Error(
@@ -545,110 +720,120 @@
     }
 
     function findSettingsForm(editDocument) {
-        return Array.from(editDocument.forms).find(form =>
-            form.querySelector(`[name="${FIELD_ACTIVE}"]`) &&
-            form.querySelector(`[name="${FIELD_OWN_MISSIONS}"]`) &&
+        return Array.from(
+            editDocument.forms
+        ).find(form =>
+            form.querySelector(
+                `[name="${FIELD_ACTIVE}"]`
+            ) &&
+            form.querySelector(
+                `[name="${FIELD_OWN_MISSIONS}"]`
+            ) &&
             form.querySelector(
                 '[name="commit"], input[type="submit"]'
             )
         );
     }
 
+    // ============================================================
+    // EINZELNE LEITSTELLE: STEUERELEMENTE
+    // ============================================================
+
     function createSettingsRow(values) {
-        const term = document.createElement('dt');
+        const term = el('dt');
 
-        const strong = document.createElement('strong');
-        strong.textContent = 'Leitstelle:';
+        term.append(
+            el('strong', '', 'Leitstelle:')
+        );
 
-        term.append(strong);
-
-        const description = document.createElement('dd');
+        const description = el('dd');
         description.id = PANEL_ID;
 
-        description.innerHTML = `
-            <form
-                style="
-                    display:inline-flex;
-                    flex-direction:column;
-                    gap:3px;
-                    margin:0;
-                "
-            >
-                <label
-                    for="nilspe-lqs-active"
-                    style="
-                        display:inline-flex;
-                        align-items:center;
-                        gap:6px;
-                        margin:0;
-                    "
-                >
-                    <input
-                        id="nilspe-lqs-active"
-                        type="checkbox"
-                        name="quick_active"
-                        style="
-                            width:13px;
-                            height:13px;
-                            margin:0;
-                        "
-                    >
-                    <span>LS deaktivieren</span>
-                </label>
+        const form = el(
+            'form',
+            'nilspe-lqs-detail-form'
+        );
 
-                <label
-                    for="nilspe-lqs-own-missions"
-                    style="
-                        display:inline-flex;
-                        align-items:center;
-                        gap:6px;
-                        margin:0;
-                    "
-                >
-                    <input
-                        id="nilspe-lqs-own-missions"
-                        type="checkbox"
-                        name="quick_own_missions"
-                        style="
-                            width:13px;
-                            height:13px;
-                            margin:0;
-                        "
-                    >
-                    <span>Eigener Einsatzbereich</span>
-                </label>
+        const options = el(
+            'div',
+            'nilspe-lqs-detail-options'
+        );
 
-                <button
-                    class="btn btn-success btn-xs"
-                    type="submit"
-                    style="align-self:flex-start;"
-                >
-                    Speichern
-                </button>
+        const active = makeCheckbox(
+            'quick_active',
+            'Leitstelle deaktivieren',
+            'Leitstelle deaktivieren',
+            values.dispatchDisabled
+        );
 
-                <span
-                    class="text-success hidden"
-                    data-quick-success
-                    style="margin-left:4px;"
-                ></span>
+        active.querySelector('input').id =
+            'nilspe-lqs-active';
 
-                <span
-                    class="text-danger hidden"
-                    data-quick-error
-                    style="margin-left:4px;"
-                ></span>
-            </form>
-        `;
+        const ownMissions = makeCheckbox(
+            'quick_own_missions',
+            'Eigener Einsatzbereich',
+            'Eigener Einsatzbereich',
+            values.ownMissions
+        );
 
-        description.querySelector(
-            '[name="quick_active"]'
-        ).checked = values.dispatchDisabled;
+        ownMissions.querySelector('input').id =
+            'nilspe-lqs-own-missions';
 
-        description.querySelector(
-            '[name="quick_own_missions"]'
-        ).checked = values.ownMissions;
+        options.append(
+            active,
+            ownMissions
+        );
 
-        return { term, description };
+        const footer = el(
+            'div',
+            'nilspe-lqs-detail-footer'
+        );
+
+        const saveButton = el(
+            'button',
+            'btn btn-success btn-xs nilspe-lqs-save',
+            'Speichern'
+        );
+
+        saveButton.type = 'submit';
+
+        const status = el(
+            'span',
+            'nilspe-lqs-status'
+        );
+
+        const success = el(
+            'span',
+            'text-success hidden'
+        );
+
+        success.dataset.quickSuccess = '';
+
+        const error = el(
+            'span',
+            'text-danger hidden'
+        );
+
+        error.dataset.quickError = '';
+
+        footer.append(
+            saveButton,
+            status,
+            success,
+            error
+        );
+
+        form.append(
+            options,
+            footer
+        );
+
+        description.append(form);
+
+        return {
+            term,
+            description
+        };
     }
 
     function insertSettingsRow(row) {
@@ -657,7 +842,10 @@
         );
 
         if (details) {
-            details.append(row.term, row.description);
+            details.append(
+                row.term,
+                row.description
+            );
             return;
         }
 
@@ -673,6 +861,10 @@
         }
     }
 
+    // ============================================================
+    // PARALLELE ANFRAGEN
+    // ============================================================
+
     async function runPool(items, concurrency, worker) {
         const queue = [...items];
 
@@ -686,6 +878,7 @@
             async () => {
                 while (queue.length) {
                     const item = queue.shift();
+
                     await worker(item);
                 }
             }
@@ -704,75 +897,285 @@
     }
 
     // ============================================================
-    // CSS
+    // DESIGN
     // ============================================================
 
     function addStyles() {
-        if (document.getElementById('nilspe-lqs-style')) {
+        if (
+            document.getElementById(
+                'nilspe-lqs-style'
+            )
+        ) {
             return;
         }
 
-        const style = document.createElement('style');
+        const style = el('style');
         style.id = 'nilspe-lqs-style';
 
         style.textContent = `
-            .nilspe-lqs-list {
+            /*
+             * ==========================================
+             * LEITSTELLENLISTE
+             * ==========================================
+             *
+             * Kompaktes Layout für die Gebäudeliste,
+             * insbesondere den schmalen Kartenrand.
+             */
+
+            #building_list > li[building_type_id="7"] {
+                min-height: 28px;
+            }
+
+            #building_list .nilspe-lqs-caption {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 3px 8px;
+                min-width: 0;
+            }
+
+            /*
+             * Der vorhandene Gebäudename
+             * behält seine Spiel-Formatierung.
+             */
+
+            #building_list .nilspe-lqs-caption
+            > a {
+                min-width: 0;
+            }
+
+            #building_list .nilspe-lqs-list {
                 display: inline-flex;
+                flex: 0 0 auto;
                 align-items: center;
                 gap: 5px;
-                margin-left: 8px;
+                margin-left: 0;
+                padding: 3px 6px;
+                border: 1px solid rgba(128,128,128,.28);
+                border-radius: 4px;
+                background: rgba(128,128,128,.09);
                 vertical-align: middle;
-                font-size: 10px;
+                font-size: 11px;
+                line-height: 16px;
                 white-space: nowrap;
+                box-sizing: border-box;
             }
 
-            .nilspe-lqs-list-option {
+            #building_list .nilspe-lqs-option {
                 display: inline-flex;
                 align-items: center;
-                gap: 2px;
+                flex: 0 0 auto;
+                gap: 4px;
                 margin: 0;
+                padding: 0 3px;
+                border-radius: 3px;
                 cursor: pointer;
+                font-size: 11px;
+                line-height: 16px;
                 font-weight: normal;
+                white-space: nowrap;
+                user-select: none;
             }
 
-            .nilspe-lqs-list-option input {
-                margin: 0;
-                width: 12px;
-                height: 12px;
+            #building_list .nilspe-lqs-option + 
+            .nilspe-lqs-option {
+                padding-left: 7px;
+                border-left: 1px solid rgba(128,128,128,.3);
+                border-radius: 0;
             }
+
+            /*
+             * Checkboxen ohne abweichende
+             * Browser- oder Bootstrap-Abstände.
+             */
+
+            .nilspe-lqs-option input[type="checkbox"] {
+                position: static !important;
+                display: inline-block;
+                flex: 0 0 13px;
+                width: 13px;
+                height: 13px;
+                margin: 0 !important;
+                padding: 0;
+                vertical-align: middle;
+                cursor: pointer;
+                accent-color: #2684d9;
+            }
+
+            .nilspe-lqs-option-text {
+                display: inline-block;
+                margin: 0;
+                padding: 0;
+                line-height: inherit;
+            }
+
+            /*
+             * Nur ungespeicherte Änderungen
+             * werden dezent hervorgehoben.
+             */
+
+            #building_list .nilspe-lqs-list.nilspe-lqs-changed {
+                border-color: rgba(240,173,78,.55);
+                background: rgba(240,173,78,.09);
+            }
+
+            #building_list .nilspe-lqs-list.nilspe-lqs-saving {
+                opacity: .8;
+            }
+
+            /*
+             * Speichern erscheint wie bisher
+             * ausschließlich bei Änderungen.
+             */
 
             .nilspe-lqs-save {
-                padding: 1px 5px;
-                font-size: 10px;
-                line-height: 14px;
+                flex: 0 0 auto;
+                padding: 2px 7px !important;
+                margin: 0 !important;
+                font-size: 11px !important;
+                line-height: 16px !important;
+                font-weight: normal;
+                border-radius: 3px;
+            }
+
+            .nilspe-lqs-save-hidden {
+                display: none !important;
             }
 
             .nilspe-lqs-status {
                 display: inline-block;
-                min-width: 10px;
+                flex: 0 0 auto;
+                min-width: 0;
                 font-weight: bold;
+                line-height: 16px;
             }
 
-            .nilspe-lqs-loading {
-                opacity: 0.65;
-                font-style: italic;
+            .nilspe-lqs-status:empty {
+                display: none;
             }
 
-            .nilspe-lqs-error {
+            .nilspe-lqs-status-success {
+                color: #5cb85c;
+            }
+
+            .nilspe-lqs-status-error {
                 color: #d9534f;
             }
 
+            #building_list .nilspe-lqs-loading {
+                opacity: .65;
+                font-size: 10px;
+                font-style: italic;
+            }
+
+            #building_list .nilspe-lqs-error {
+                color: #d9534f;
+                font-size: 10px;
+            }
+
             /*
-             * NEU: Speichern nur bei Änderungen anzeigen.
-             * Gilt sowohl für die Liste als auch
-             * für die einzelne Leitstellenseite.
+             * ==========================================
+             * EINZELNE LEITSTELLE
+             * ==========================================
+             *
+             * Kompakte, untereinander angeordnete
+             * Optionen mit sauberer Ausrichtung.
              */
-            .nilspe-lqs-save-hidden {
-                display: none !important;
+
+            #${PANEL_ID} .nilspe-lqs-detail-form {
+                display: inline-flex;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+                max-width: 100%;
+                padding: 10px 12px;
+                margin: 0;
+                border: 1px solid rgba(128,128,128,.28);
+                border-radius: 4px;
+                background: rgba(128,128,128,.07);
+                box-sizing: border-box;
+            }
+
+            #${PANEL_ID} .nilspe-lqs-detail-options {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 7px;
+            }
+
+            #${PANEL_ID} .nilspe-lqs-option {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                margin: 0;
+                padding: 0;
+                cursor: pointer;
+                font-size: 12px;
+                line-height: 18px;
+                font-weight: normal;
+                user-select: none;
+            }
+
+            #${PANEL_ID} .nilspe-lqs-option input {
+                flex: 0 0 14px;
+                width: 14px;
+                height: 14px;
+            }
+
+            #${PANEL_ID} .nilspe-lqs-detail-footer {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 8px;
+                min-height: 0;
+            }
+
+            #${PANEL_ID}.nilspe-lqs-changed
+            .nilspe-lqs-detail-form {
+                border-color: rgba(240,173,78,.55);
+                background: rgba(240,173,78,.09);
+            }
+
+            #${PANEL_ID}.nilspe-lqs-saving
+            .nilspe-lqs-detail-form {
+                opacity: .8;
+            }
+
+            /*
+             * ==========================================
+             * SCHMALE ANSICHTEN
+             * ==========================================
+             *
+             * Bei wenig Platz bleiben die
+             * Checkboxen nebeneinander,
+             * können aber auf die nächste
+             * Zeile umbrechen.
+             */
+
+            @media (max-width: 500px) {
+                #building_list .nilspe-lqs-list {
+                    gap: 4px;
+                    padding: 3px 5px;
+                    font-size: 10px;
+                }
+
+                #building_list .nilspe-lqs-option {
+                    font-size: 10px;
+                    padding: 0 2px;
+                }
+
+                #building_list .nilspe-lqs-option + 
+                .nilspe-lqs-option {
+                    padding-left: 5px;
+                }
             }
         `;
 
         document.head.append(style);
     }
 
+    console.log(
+        PREFIX,
+        `Version ${VERSION} geladen`
+    );
 })();
