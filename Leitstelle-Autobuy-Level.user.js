@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Leitstelle Autobuy Level
 // @namespace    NilsPe.autobuy.level.api
-// @version      2.6.1
+// @version      2.8.1
 // @description  Direktausbau bis zur absoluten Zielstufe mit Weiterleitungs- und Sicherheitsprüfung
 // @author       NilsPe
 // @license      MIT
@@ -12,6 +12,8 @@
 // @updateURL    https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/Leitstelle-Autobuy-Level.user.js
 // @match        https://*.leitstellenspiel.de/buildings/*
 // @match        https://*.leitstellenspiel.de/settings/index*
+// @match        https://leitstellenspiel.de/buildings/*
+// @match        https://leitstellenspiel.de/settings/index*
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @require      https://raw.githubusercontent.com/NilsPee/LSS_V2_Scripts/main/NilsPe-Skriptbasis.user.js?v=1.0.13
@@ -23,42 +25,29 @@
   'use strict';
 
   const PREFIX = '[Autobuy Level]';
-  const VERSION = '2.6.1';
+  const VERSION = '2.8.1';
 
   const BUILDING_TYPES = [
-    { id: 0, label: 'Feuerwache' },
-    { id: 1, label: 'Feuerwehrschule' },
-    { id: 2, label: 'Rettungswache' },
-    { id: 3, label: 'Rettungsschule' },
-    { id: 4, label: 'Krankenhaus' },
-    { id: 5, label: 'Rettungshubschrauber-Station' },
-    { id: 6, label: 'Polizeiwache' },
-    { id: 7, label: 'Leitstelle' },
-    { id: 8, label: 'Polizeischule' },
-    { id: 9, label: 'THW-Ortsverband' },
-    { id: 10, label: 'THW Bundesschule' },
-    { id: 11, label: 'Bereitschaftspolizei' },
-    { id: 12, label: 'Schnelleinsatzgruppe (SEG)' },
-    { id: 13, label: 'Polizeihubschrauberstation' },
-    { id: 14, label: 'Bereitstellungsraum' },
-    { id: 15, label: 'Wasserrettung' },
-    { id: 16, label: 'Verbandszellen' },
-    { id: 17, label: 'Polizei-Sondereinheiten' },
-    { id: 18, label: 'Feuerwache (Kleinwache)' },
-    { id: 19, label: 'Polizeiwache (Kleinwache)' },
-    { id: 20, label: 'Rettungswache (Kleinwache)' },
-    { id: 21, label: 'Rettungshundestaffel' },
-    { id: 22, label: 'Großer Komplex' },
-    { id: 23, label: 'Kleiner Komplex' },
-    { id: 24, label: 'Reiterstaffel' },
-    { id: 25, label: 'Bergrettung' },
-    { id: 26, label: 'Seenotrettungswache' },
-    { id: 27, label: 'Schule für Seefahrt und Seenotrettung' },
-    { id: 28, label: 'Hubschrauberstation (Seenotrettung)' }
+    { id: 0, label: 'Feuerwache', maxLevel: 19 },
+    { id: 2, label: 'Rettungswache', maxLevel: 14 },
+    { id: 4, label: 'Krankenhaus', maxLevel: 20 },
+    { id: 5, label: 'Rettungshubschrauber-Station', maxLevel: 14 },
+    { id: 6, label: 'Polizeiwache', maxLevel: 14 },
+    { id: 15, label: 'Wasserrettung', maxLevel: 5 },
+    { id: 18, label: 'Feuerwache (Kleinwache)', maxLevel: 5 },
+    { id: 19, label: 'Polizeiwache (Kleinwache)', maxLevel: 5 },
+    { id: 20, label: 'Rettungswache (Kleinwache)', maxLevel: 5 },
+    { id: 21, label: 'Rettungshundestaffel', maxLevel: 5 },
+    { id: 22, label: 'Großer Komplex', maxLevel: 5 },
+    { id: 23, label: 'Kleiner Komplex', maxLevel: 5 },
+    { id: 25, label: 'Bergrettungswache', maxLevel: 14 },
+    { id: 26, label: 'Seenotrettungswache', maxLevel: 4 },
+    { id: 29, label: 'Autobahnpolizei', maxLevel: 9 }
   ];
 
   const SETTINGS_IDENTIFIER = 'autobuy_level_types';
   const KEY_LEVEL_PREFIX = 'abl_target_level_';
+  const KEY_DISABLED_PREFIX = 'abl_disabled_type_';
   const KEY_DELAY_BUILDING = 'abl_delay_per_building';
   const KEY_DELAY_FETCH = 'abl_delay_after_fetch';
 
@@ -101,52 +90,110 @@
    */
 
   if (location.pathname.startsWith('/settings/index')) {
-    if (typeof addOptions !== 'function') {
+    if (typeof waitForSettingsDom !== 'function' ||
+        typeof createSettingsPane !== 'function') {
       console.error(PREFIX, 'NilsPe-Skriptbasis fehlt');
       return;
     }
+    if (!await waitForSettingsDom()) return;
 
-    const typeInputs = BUILDING_TYPES.map(type => ({
-      type: 'number',
-      key: KEY_LEVEL_PREFIX + type.id,
-      default: 0,
-      min: 0,
-      max: 50,
-      label: `${type.id} ${type.label} – Zielstufe`
-    }));
+    const { anchor, body } = createSettingsPane(
+      SETTINGS_IDENTIFIER, 'Autobuy Level'
+    );
+    let rendered = false;
+    anchor.addEventListener('click', () => void renderSettings());
 
-    await addOptions({
-      identifier: SETTINGS_IDENTIFIER,
-      title: 'Autobuy Level',
-      settings: [
-        {
-          type: 'header',
-          text: 'Absolute Zielstufen je Gebäudetyp'
-        },
-        ...typeInputs,
-        {
-          type: 'header',
-          text: 'Ablauf'
-        },
-        {
-          type: 'number',
-          key: KEY_DELAY_BUILDING,
-          default: DEFAULT_DELAY_BUILDING,
-          min: 0,
-          max: 5000,
-          label: 'Pause nach einem Direktkauf [ms]'
-        },
-        {
-          type: 'number',
-          key: KEY_DELAY_FETCH,
-          default: DEFAULT_DELAY_FETCH,
-          min: 0,
-          max: 5000,
-          label: 'Delay nach HTML-Fallback [ms]'
+    async function renderSettings() {
+      if (rendered) return;
+      rendered = true;
+      const title = document.createElement('h2');
+      title.textContent = 'Absolute Zielstufen je Gebäudetyp';
+      body.append(title);
+
+      for (const type of BUILDING_TYPES) {
+        const targetKey = KEY_LEVEL_PREFIX + type.id;
+        const disabledKey = KEY_DISABLED_PREFIX + type.id;
+        let target = Math.min(type.maxLevel, Number(await GM.getValue(targetKey, 0)));
+        let active = !(await GM.getValue(disabledKey, false));
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:240px minmax(max-content,1fr) 40px;align-items:center;gap:12px;padding:6px 8px;margin-bottom:4px;border:1px solid;border-radius:3px;overflow-x:auto';
+        const name = document.createElement('span');
+        name.textContent = `${type.label} (${type.id})`;
+        name.style.whiteSpace = 'nowrap';
+        const levels = document.createElement('div');
+        levels.style.cssText = 'display:flex;flex-wrap:nowrap;gap:4px';
+        const levelButtons = [];
+        for (let level = 1; level <= type.maxLevel; level++) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'btn btn-default btn-xs';
+          button.textContent = String(level);
+          button.style.minWidth = '28px';
+          button.title = `Zielstufe ${level}`;
+          button.addEventListener('click', async () => {
+            target = target === level ? 0 : level;
+            updateRow();
+            await GM.setValue(targetKey, target);
+          });
+          levelButtons.push(button);
+          levels.append(button);
         }
-      ]
-    });
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.style.width = '32px';
+        function updateRow() {
+          row.style.background = active ? 'rgba(92, 184, 92, .10)' : '#8881';
+          row.style.borderColor = active ? 'rgba(92, 184, 92, .35)' : '#8885';
+          name.style.opacity = active ? '1' : '.6';
+          toggle.textContent = active ? '✕' : '✓';
+          toggle.className = active
+            ? 'btn btn-danger btn-xs' : 'btn btn-success btn-xs';
+          toggle.title = active ? 'Gebäudetyp abwählen' : 'Gebäudetyp auswählen';
+          for (let index = 0; index < levelButtons.length; index++) {
+            levelButtons[index].className = index + 1 === target
+              ? 'btn btn-success btn-xs' : 'btn btn-default btn-xs';
+          }
+        }
+        toggle.addEventListener('click', async () => {
+          active = !active;
+          updateRow();
+          await GM.setValue(disabledKey, !active);
+        });
+        name.addEventListener('click', () => toggle.click());
+        row.append(name, levels, toggle);
+        updateRow();
+        body.append(row);
+      }
 
+      const flowTitle = document.createElement('h2');
+      flowTitle.textContent = 'Ablauf';
+      body.append(flowTitle);
+      for (const [key, label, fallback] of [
+        [KEY_DELAY_BUILDING, 'Pause nach einem Direktkauf [ms]', DEFAULT_DELAY_BUILDING],
+        [KEY_DELAY_FETCH, 'Delay nach HTML-Fallback [ms]', DEFAULT_DELAY_FETCH]
+      ]) {
+        const field = document.createElement('label');
+        field.style.cssText = 'display:block;margin-bottom:10px';
+        field.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '5000';
+        input.className = 'form-control';
+        input.style.width = '130px';
+        input.value = await GM.getValue(key, fallback);
+        input.addEventListener('change', () => {
+          void GM.setValue(key, Math.min(5000, Math.max(0, Number(input.value) || 0)));
+        });
+        field.append(input);
+        body.append(field);
+      }
+    }
+    if (location.hash === `#${SETTINGS_IDENTIFIER}`) {
+      await renderSettings();
+      anchor.click();
+    }
     return;
   }
 
@@ -158,6 +205,7 @@
 
   async function getTargetLevel(typeId) {
     const key = String(typeId);
+    const maximum = BUILDING_TYPES.find(type => type.id === Number(typeId))?.maxLevel ?? 0;
 
     if (!targetCache.has(key)) {
       const value = Number(
@@ -166,11 +214,15 @@
           0
         )
       );
+      const disabled = await GM.getValue(
+        KEY_DISABLED_PREFIX + key,
+        false
+      );
 
       targetCache.set(
         key,
-        Number.isInteger(value) && value > 0
-          ? value
+        !disabled && Number.isInteger(value) && value > 0
+          ? Math.min(value, maximum)
           : 0
       );
     }
@@ -990,123 +1042,104 @@
    */
 
   function ensureStyles() {
-    if (document.getElementById('abl-style')) {
-      return;
-    }
-
+    if (document.getElementById('abl-style')) return;
     const style = document.createElement('style');
     style.id = 'abl-style';
-
     style.textContent = `
-      #abl-nav {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: #f8f8f8;
-        border-top: 1px solid #e7e7e7;
-        z-index: 2147483000;
-        padding: 7px 10px;
-      }
-
-      body.abl-hasbar {
-        padding-bottom: 45px !important;
-      }
-
-      #abl-wrap {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-
-      #abl-state {
-        min-width: 260px;
-        font-size: 13px;
-        white-space: normal;
-      }
-
-      #abl-progress {
-        flex: 1;
-        height: 12px;
-        background: #eee;
-        border-radius: 4px;
-        overflow: hidden;
-        display: flex;
-      }
-
-      #abl-bar-ok {
-        height: 100%;
-        background: #5cb85c;
-        width: 0%;
-      }
-
-      #abl-bar-err {
-        height: 100%;
-        background: #d9534f;
-        width: 0%;
-      }
+      #abl-nav {position:fixed;left:0;right:0;bottom:0;z-index:2147483000;padding:9px 12px;border-top:1px solid #888;background:#333;color:#fff}
+      #abl-wrap {display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+      #abl-statistics {display:flex;flex-wrap:wrap;gap:20px;margin-top:6px;font-size:12px}
+      #abl-progress {height:12px;margin-top:6px;overflow:hidden;border-radius:4px;background:#777}
+      #abl-bar-ok {height:100%;width:0;background:#5cb85c;transition:width .15s}
     `;
-
     document.head.append(style);
   }
 
   function createNavbar() {
+    ensureStyles();
     if (document.getElementById('abl-nav')) {
+      document.getElementById('abl-stop').disabled = false;
+      document.getElementById('abl-close').disabled = true;
       return;
     }
-
-    ensureStyles();
-
     const nav = document.createElement('div');
     nav.id = 'abl-nav';
-
     const wrap = document.createElement('div');
     wrap.id = 'abl-wrap';
-
     const label = document.createElement('span');
     label.id = 'abl-state';
     label.className = 'label label-info';
     label.textContent = 'Bereit';
-
+    const stop = document.createElement('button');
+    stop.id = 'abl-stop';
+    stop.type = 'button';
+    stop.className = 'btn btn-danger btn-xs';
+    stop.textContent = 'Abbrechen';
+    stop.addEventListener('click', () => {
+      cancelled = true;
+      stop.disabled = true;
+      label.textContent = 'Abbruch – laufende Anfrage wird beendet...';
+    });
+    const close = document.createElement('button');
+    close.id = 'abl-close';
+    close.type = 'button';
+    close.className = 'btn btn-default btn-xs';
+    close.textContent = 'Schließen';
+    close.disabled = true;
+    close.addEventListener('click', () => {
+      if (running) return;
+      nav.remove();
+      document.getElementById('abl-style')?.remove();
+    });
+    wrap.append(stop, label, close);
+    const statistics = document.createElement('div');
+    statistics.id = 'abl-statistics';
     const progress = document.createElement('div');
     progress.id = 'abl-progress';
-
-    const ok = document.createElement('div');
-    ok.id = 'abl-bar-ok';
-
-    const err = document.createElement('div');
-    err.id = 'abl-bar-err';
-
-    progress.append(ok, err);
-    wrap.append(label, progress);
-    nav.append(wrap);
-
+    const bar = document.createElement('div');
+    bar.id = 'abl-bar-ok';
+    progress.append(bar);
+    nav.append(wrap, statistics, progress);
     document.body.append(nav);
-    document.body.classList.add('abl-hasbar');
   }
 
   function setState(text, cls = 'info') {
     const label = document.getElementById('abl-state');
-
     if (!label) return;
-
     label.className = `label label-${cls}`;
     label.textContent = text;
   }
 
   function updateProgress(done, errors, total) {
-    const okBar = document.getElementById('abl-bar-ok');
-    const errBar = document.getElementById('abl-bar-err');
+    const bar = document.getElementById('abl-bar-ok');
+    if (!bar) return;
+    bar.style.width = total > 0
+      ? `${Math.min(100, (done + errors) / total * 100)}%`
+      : '0%';
+  }
 
-    if (!okBar || !errBar) return;
+  function updateStatistics(upgraded, skipped, errors, total) {
+    const element = document.getElementById('abl-statistics');
+    if (!element) return;
+    const format = number => Number(number).toLocaleString('de-DE');
+    element.replaceChildren();
+    for (const entry of [
+      `Ausgebaut: ${format(upgraded)}`,
+      `Übersprungen: ${format(skipped)}`,
+      `Fehler: ${format(errors)}`,
+      `Gebäude: ${format(upgraded + skipped + errors)}/${format(total)}`
+    ]) {
+      const span = document.createElement('span');
+      span.textContent = entry;
+      element.append(span);
+    }
+  }
 
-    const safeTotal = Math.max(total, 1);
-
-    okBar.style.width =
-      `${done / safeTotal * 100}%`;
-
-    errBar.style.width =
-      `${errors / safeTotal * 100}%`;
+  function finishNavbar() {
+    const stop = document.getElementById('abl-stop');
+    const close = document.getElementById('abl-close');
+    if (stop) stop.disabled = true;
+    if (close) close.disabled = false;
   }
 
   /*
@@ -1192,6 +1225,7 @@
       }
 
       const total = configured.length;
+      updateStatistics(0, skipped, 0, total);
 
       log('Vorauswahl:', {
         configured: total,
@@ -1268,6 +1302,7 @@
           errors,
           total
         );
+        updateStatistics(upgraded, skipped + additionalSkipped, errors, total);
 
         setState(
           `${upgraded} ausgebaut, ` +
@@ -1322,6 +1357,7 @@
     } finally {
       running = false;
       sessionStorage.removeItem(RUN_FLAG);
+      finishNavbar();
     }
   }
 
@@ -1501,6 +1537,7 @@
           );
 
           updateProgress(1, 0, 1);
+          updateStatistics(0, 1, 0, 1);
           return;
         }
 
@@ -1521,18 +1558,8 @@
         );
 
         updateProgress(1, 0, 1);
-
-        /*
-         * Gewollter Reload nur nach
-         * erfolgreich bestätigtem Kauf.
-         */
-
-        if (result.status === 'upgraded') {
-          setTimeout(
-            () => location.reload(),
-            700
-          );
-        }
+        updateStatistics(result.status === 'upgraded' ? 1 : 0,
+          result.status === 'skipped' ? 1 : 0, 0, 1);
 
       } catch (error) {
         console.error(
@@ -1547,10 +1574,12 @@
         );
 
         updateProgress(0, 1, 1);
+        updateStatistics(0, 0, 1, 1);
 
       } finally {
         running = false;
         sessionStorage.removeItem(RUN_FLAG);
+        finishNavbar();
       }
     }
   );
