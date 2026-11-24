@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Leitstelle De-/Activate Buildings
 // @namespace    NilsPe.activate.buildings
-// @version      1.2.0
+// @version      1.2.2
 // @description  Aktiviert oder deaktiviert konfigurierte Gebäude einer Leitstelle
 // @author       NilsPe
 // @license      MIT
@@ -25,7 +25,7 @@
 (async function () {
   'use strict';
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.2.2';
   const PREFIX = '[De-/Activate Buildings]';
   const SETTINGS_IDENTIFIER = 'nilspe_activate_buildings';
 
@@ -76,13 +76,8 @@
   function el(tag, className = '', text = '') {
     const element = document.createElement(tag);
 
-    if (className) {
-      element.className = className;
-    }
-
-    if (text) {
-      element.textContent = text;
-    }
+    if (className) element.className = className;
+    if (text) element.textContent = text;
 
     return element;
   }
@@ -108,9 +103,7 @@
   function safeNumber(raw, fallback, min, max) {
     const value = Number(raw);
 
-    if (!Number.isFinite(value)) {
-      return fallback;
-    }
+    if (!Number.isFinite(value)) return fallback;
 
     return Math.max(
       min,
@@ -140,19 +133,33 @@
     }
   }
 
+  /*
+   * ==========================================
+   * EINHEITLICHER EINSTELLUNGSSTANDARD
+   * ==========================================
+   *
+   * Hauptüberschrift und Beschreibung
+   * entsprechen Delete Buildings.
+   *
+   * Keine eigene h2-Fettschrift oder
+   * abweichende h2-Abstände.
+   */
+
   function injectSettingsStyles() {
-    if (
-      document.getElementById(
-        'nilspe-ab-settings-style'
-      )
-    ) {
-      return;
-    }
+    if (document.getElementById(
+      'nilspe-ab-settings-style'
+    )) return;
 
     const style = el('style');
     style.id = 'nilspe-ab-settings-style';
 
     style.textContent = `
+      #${SETTINGS_IDENTIFIER} .nilspe-ab-info {
+        margin-bottom: 10px;
+        font-size: 12px;
+        opacity: .85;
+      }
+
       #${SETTINGS_IDENTIFIER} .nilspe-ab-group {
         margin-bottom: 7px;
         border: 1px solid #8885;
@@ -162,19 +169,13 @@
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-group > summary {
         padding: 9px 12px;
-        cursor: pointer;
         background: #8882;
+        cursor: pointer;
         font-weight: bold;
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-group-content {
         padding: 10px;
-      }
-
-      #${SETTINGS_IDENTIFIER} .nilspe-ab-help {
-        margin-bottom: 10px;
-        font-size: 12px;
-        opacity: .85;
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-toolbar {
@@ -198,21 +199,21 @@
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-count {
-        margin-left: 4px;
         font-size: 12px;
         opacity: .75;
+        margin-left: 4px;
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-option {
         display: flex;
         align-items: center;
         gap: 9px;
-        box-sizing: border-box;
         padding: 7px 9px;
         margin-bottom: 4px;
-        background: #8881;
         border: 1px solid #8885;
         border-radius: 3px;
+        background: #8881;
+        box-sizing: border-box;
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-option.active {
@@ -241,11 +242,11 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 4px;
         padding: 7px 9px;
+        margin-bottom: 4px;
         border: 1px solid rgba(92,184,92,.35);
-        background: rgba(92,184,92,.10);
         border-radius: 3px;
+        background: rgba(92,184,92,.10);
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-ab-number input {
@@ -287,13 +288,13 @@
 
     if (description) {
       content.append(
-        el('p', 'nilspe-ab-help', description)
+        el('p', 'nilspe-ab-info', description)
       );
     }
 
     details.append(summary, content);
 
-    return { details, summary, content };
+    return { details, content };
   }
 
   /*
@@ -620,7 +621,30 @@
           max: 5000
         });
 
+        /*
+         * Einheitliche Hauptüberschrift
+         * wie bei Delete Buildings.
+         *
+         * Normales h2 ohne eigene Klasse.
+         * Kein font-weight: bold.
+         * Keine abweichenden Außenabstände.
+         */
+
+        const title = el(
+          'h2',
+          '',
+          'De-/Activate Buildings'
+        );
+
+        const description = el(
+          'p',
+          'nilspe-ab-info',
+          'Gebäudetypen auswählen und deren Aktivierung oder Deaktivierung konfigurieren.'
+        );
+
         body.replaceChildren(
+          title,
+          description,
           activate.details,
           deactivate.details,
           flow.details
