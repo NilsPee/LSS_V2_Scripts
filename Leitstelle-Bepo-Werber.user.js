@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         Leitstelle-Bepo-Werber
 // @namespace    NilsPe.bepo.personnel
-// @version      1.1.2
-// @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf BePo-Zielwachen
+// @version      1.3.1
+// @description  BePo-Personalwerber mit getrennten Modi für unausgebildetes und ausgebildetes Personal
 // @author       NilsPe
 // @license      MIT
 // @homepageURL  https://github.com/NilsPee/LSS_V2_Scripts
@@ -24,12 +24,9 @@
 (async function () {
   'use strict';
 
+  const VERSION = '1.3.1';
   const PREFIX = '[Leitstelle BePo-Werber]';
-  const VERSION = '1.1.2';
   const SETTINGS_IDENTIFIER = 'nilspe_bepo_personnel';
-
-  let RUN_LOCK_KEY = null;
-  let SESSION_RUN_KEY = null;
 
   const KEYS = {
     targetPersonnel: 'nilspe_bepo_target_personnel',
@@ -37,20 +34,163 @@
     bepoReserve: 'nilspe_bepo_bepo_reserve',
     excludedTargets: 'nilspe_bepo_excluded_targets',
     excludedSources: 'nilspe_bepo_excluded_sources',
-    excludedDispatchCenters: 'nilspe_bepo_excluded_dispatch_centers',
-    limitedDispatchCenters: 'nilspe_bepo_limited_dispatch_centers',
-    requestDelay: 'nilspe_bepo_request_delay'
+    excludedDispatchCenters:
+      'nilspe_bepo_excluded_dispatch_centers',
+    limitedDispatchCenters:
+      'nilspe_bepo_limited_dispatch_centers',
+    requestDelay: 'nilspe_bepo_request_delay',
+
+    mode: 'nilspe_bepo_personnel_mode_v1',
+    trainingCounts: 'nilspe_bepo_training_counts_v1'
   };
+
+  const MODES = {
+    UNTRAINED: 'untrained',
+    TRAINED: 'trained'
+  };
+
+  /*
+   * Jede Ausbildung besitzt eine eigene
+   * Stückzahl im Ausbildungsmodus.
+   *
+   * Die Bezeichnungen in aliases werden
+   * exakt mit der Personalliste abgeglichen.
+   */
+
+  const EDUCATIONS = [
+    {
+      key: 'zugfuehrer',
+      label: 'Zugführer',
+      aliases: [
+        'Zugführer',
+        'Zugführer (leBefKw)'
+      ]
+    },
+    {
+      key: 'hundertschaftsfuehrer',
+      label: 'Hundertschaftsführer',
+      aliases: [
+        'Hundertschaftsführer',
+        'Hundertschaftsführer (FüKw)'
+      ]
+    },
+    {
+      key: 'wasserwerfer',
+      label: 'Wasserwerfer',
+      aliases: [
+        'Wasserwerfer'
+      ]
+    },
+    {
+      key: 'sek',
+      label: 'SEK',
+      aliases: [
+        'SEK'
+      ]
+    },
+    {
+      key: 'mek',
+      label: 'MEK',
+      aliases: [
+        'MEK'
+      ]
+    },
+    {
+      key: 'hundefuehrer',
+      label: 'Hundeführer',
+      aliases: [
+        'Hundeführer',
+        'Hundeführer (Schutzhund)'
+      ]
+    }
+  ];
+
+  const SOURCE_TYPES = [6, 11];
+  const TARGET_TYPE = 11;
+
+  /*
+   * Im Ausbildungsmodus bleibt immer
+   * mindestens eine Person je Quelle.
+   *
+   * Die regulären Mindestpersonalwerte
+   * werden dort NICHT verwendet.
+   */
+
+  const TRAINED_SOURCE_RESERVE = 1;
+
+  let RUN_LOCK_KEY = null;
+  let SESSION_RUN_KEY = null;
+
+  let running = false;
+  let cancelRequested = false;
 
   const sleep = ms =>
     new Promise(resolve => setTimeout(resolve, ms));
 
+  function el(tag, className = '', text = '') {
+    const node = document.createElement(tag);
+
+    if (className) {
+      node.className = className;
+    }
+
+    if (text) {
+      node.textContent = text;
+    }
+
+    return node;
+  }
+
+  function normalizeText(value) {
+    return String(value ?? '')
+      .normalize('NFC')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLocaleLowerCase('de-DE');
+  }
+
   function parseJson(value, fallback) {
     try {
-      return JSON.parse(value);
+      return typeof value === 'string'
+        ? JSON.parse(value)
+        : value ?? fallback;
     } catch {
       return fallback;
     }
+  }
+
+  function csrfToken() {
+    return document.querySelector(
+      'meta[name="csrf-token"]'
+    )?.content ?? '';
+  }
+
+  function currentBuildingId() {
+    const match = location.pathname.match(
+      /^\/buildings\/(\d+)/
+    );
+
+    return match ? Number(match[1]) : null;
+  }
+
+  function currentBuildingType() {
+    return Number(
+      document.querySelector(
+        'h1[building_type]'
+      )?.getAttribute('building_type')
+    );
+  }
+
+  /*
+   * ==========================================
+   * ACCOUNT / SPEICHER
+   * ==========================================
+   */
+
+  async function accountStorageKey(key) {
+    const accountId = await getCurrentAccountId();
+    return `${key}_${accountId}`;
   }
 
   async function initializeAccountKeys() {
@@ -63,9 +203,86 @@
       `nilspe_bepo_personnel_session_${accountId}`;
   }
 
+  async function loadMode() {
+    const key = await accountStorageKey(KEYS.mode);
+    const mode = await GM.getValue(
+      key,
+      MODES.UNTRAINED
+    );
+
+    return Object.values(MODES).includes(mode)
+      ? mode
+      : MODES.UNTRAINED;
+  }
+
+  async function saveMode(mode) {
+    if (!Object.values(MODES).includes(mode)) {
+      throw new Error('Ungültiger Modus.');
+    }
+
+    const key = await accountStorageKey(KEYS.mode);
+    await GM.setValue(key, mode);
+  }
+
+  function emptyTrainingCounts() {
+    const result = {};
+
+    for (const education of EDUCATIONS) {
+      result[education.key] = 0;
+    }
+
+    return result;
+  }
+
+  async function loadTrainingCounts() {
+    const key = await accountStorageKey(
+      KEYS.trainingCounts
+    );
+
+    const raw = await GM.getValue(key, '{}');
+    const parsed = parseJson(raw, {});
+
+    const result = emptyTrainingCounts();
+
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed)
+    ) {
+      return result;
+    }
+
+    for (const education of EDUCATIONS) {
+      const value = Number(
+        parsed[education.key] ?? 0
+      );
+
+      if (
+        Number.isInteger(value) &&
+        value >= 0 &&
+        value <= 400
+      ) {
+        result[education.key] = value;
+      }
+    }
+
+    return result;
+  }
+
+  async function saveTrainingCounts(counts) {
+    const key = await accountStorageKey(
+      KEYS.trainingCounts
+    );
+
+    await GM.setValue(
+      key,
+      JSON.stringify(counts)
+    );
+  }
+
   async function storedArray(key) {
-    const value = await GM.getValue(key, '[]');
-    const parsed = parseJson(value, []);
+    const raw = await GM.getValue(key, '[]');
+    const parsed = parseJson(raw, []);
 
     return Array.isArray(parsed)
       ? parsed.map(Number).filter(Number.isFinite)
@@ -83,7 +300,9 @@
       ...building,
       id: Number(building.id),
       building_type: Number(building.building_type),
-      personal_count: Number(building.personal_count ?? 0),
+      personal_count: Number(
+        building.personal_count ?? 0
+      ),
       leitstelle_building_id:
         dispatchCenterId == null
           ? null
@@ -97,13 +316,13 @@
 
   /*
    * ==========================================
-   * EINSTELLUNGEN
+   * EINSTELLUNGEN DER SKRIPTBASIS
    * ==========================================
    *
-   * Unveränderte Speicherkeys.
+   * Die bisherigen Keys bleiben erhalten.
    *
-   * Die NilsPe-Skriptbasis übernimmt weiterhin
-   * die Speicherung sämtlicher Felder.
+   * Die Modusauswahl und die sechs
+   * Ausbildungsfelder werden ergänzt.
    */
 
   const SETTINGS_DEFINITIONS = [
@@ -179,7 +398,7 @@
 
   /*
    * ==========================================
-   * EINSTELLUNGSOBERFLÄCHE
+   * EINSTELLUNGSSTYLES
    * ==========================================
    */
 
@@ -192,7 +411,7 @@
       return;
     }
 
-    const style = document.createElement('style');
+    const style = el('style');
     style.id = 'nilspe-bepo-settings-style';
 
     style.textContent = `
@@ -257,8 +476,7 @@
         gap: 12px;
       }
 
-      #${SETTINGS_IDENTIFIER} .nilspe-bepo-number
-      label {
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-number label {
         order: 2;
         flex: 1;
         margin: 0;
@@ -268,16 +486,15 @@
       input[type="number"] {
         order: 1;
         flex: 0 0 84px;
-        box-sizing: border-box;
         width: 84px !important;
         height: 28px !important;
         margin: 0 !important;
         padding: 3px 7px !important;
         text-align: left;
+        box-sizing: border-box;
       }
 
-      #${SETTINGS_IDENTIFIER} .nilspe-bepo-select
-      label {
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-select label {
         display: block;
         margin-bottom: 6px;
       }
@@ -310,12 +527,92 @@
         margin: 0 !important;
         padding: 2px 6px !important;
         font-size: 13px;
-        line-height: 1;
       }
 
       #${SETTINGS_IDENTIFIER} .nilspe-bepo-count {
         font-size: 12px;
         opacity: .75;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-mode {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-mode-btn {
+        min-height: 31px;
+        min-width: 148px;
+        font-size: 13px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-mode-btn.active {
+        background: #5cb85c;
+        color: #fff;
+        border-color: #4cae4c;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-mode-info {
+        font-size: 12px;
+        margin-bottom: 10px;
+        opacity: .85;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-mode-status {
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+
+      #${SETTINGS_IDENTIFIER} .nilspe-bepo-training-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 7px 9px;
+        margin-bottom: 4px;
+        border: 1px solid #8885;
+        background: #8881;
+        border-radius: 3px;
+      }
+
+      #${SETTINGS_IDENTIFIER}
+      .nilspe-bepo-training-row.active {
+        background: rgba(92,184,92,.10);
+        border-color: rgba(92,184,92,.35);
+      }
+
+      #${SETTINGS_IDENTIFIER}
+      .nilspe-bepo-training-input {
+        flex: 0 0 84px;
+        width: 84px !important;
+        height: 28px !important;
+        padding: 3px 7px !important;
+        margin: 0 !important;
+        box-sizing: border-box;
+      }
+
+      #${SETTINGS_IDENTIFIER}
+      .nilspe-bepo-training-label {
+        flex: 1;
+        margin: 0;
+      }
+
+      #${SETTINGS_IDENTIFIER}
+      .nilspe-bepo-training-summary {
+        margin-top: 10px;
+        padding: 8px 10px;
+        background: #8881;
+        border: 1px solid #8885;
+        border-radius: 3px;
+        font-size: 12px;
+      }
+
+      #${SETTINGS_IDENTIFIER}
+      .nilspe-bepo-training-status {
+        margin-top: 6px;
+        font-size: 12px;
+        opacity: .85;
       }
     `;
 
@@ -323,72 +620,39 @@
   }
 
   function pageJQuery() {
-    if (typeof unsafeWindow !== 'undefined') {
-      return unsafeWindow.jQuery ??
-        unsafeWindow.$ ??
-        null;
-    }
-
-    return null;
+    return unsafeWindow?.jQuery ??
+      unsafeWindow?.$ ??
+      null;
   }
 
   function refreshSelectpicker(select) {
     const jq = pageJQuery();
 
-    if (typeof jq !== 'function') {
-      return;
-    }
+    if (typeof jq !== 'function') return;
 
     const picker = jq(select);
 
-    if (
-      typeof picker.selectpicker === 'function'
-    ) {
+    if (typeof picker.selectpicker === 'function') {
       picker.selectpicker('refresh');
     }
   }
 
   /*
    * ==========================================
-   * FELDER DER SKRIPTBASIS ERKENNEN
+   * ORIGINALFELDER DER SKRIPTBASIS
    * ==========================================
-   *
-   * WICHTIGE KORREKTUR v1.1.2:
-   *
-   * Zahlenfelder:
-   *
-   * body
-   *   -> .form-group
-   *       -> .col-sm-6
-   *           -> input
-   *
-   * Mehrfachauswahlen:
-   *
-   * body
-   *   -> div
-   *       -> .form-group
-   *           -> .col-sm-6
-   *               -> select
-   *
-   * Es wird immer der vollständige direkte
-   * Kindknoten des Einstellungs-Bodys gesucht.
    */
 
   function findSettingField(body, key) {
-    const prefix =
-      `nilspe_setting_${key}_`;
+    const prefix = `nilspe_setting_${key}_`;
 
     const control = Array.from(
       body.querySelectorAll(
         'input[id], select[id]'
       )
-    ).find(node =>
-      node.id.startsWith(prefix)
-    );
+    ).find(node => node.id.startsWith(prefix));
 
-    if (!control) {
-      return null;
-    }
+    if (!control) return null;
 
     let container = control;
 
@@ -399,91 +663,56 @@
       container = container.parentElement;
     }
 
-    if (
-      container.parentElement !== body
-    ) {
-      return null;
-    }
-
-    return {
-      control,
-      container
-    };
+    return container.parentElement === body
+      ? { control, container }
+      : null;
   }
 
   function makeGroup(title, description) {
-    const details = document.createElement(
-      'details'
+    const details = el(
+      'details',
+      'nilspe-bepo-group'
     );
 
-    details.className =
-      'nilspe-bepo-group';
+    const summary = el('summary', '', title);
 
-    const summary = document.createElement(
-      'summary'
+    const content = el(
+      'div',
+      'nilspe-bepo-group-body'
     );
-
-    summary.textContent = title;
-
-    const content = document.createElement(
-      'div'
-    );
-
-    content.className =
-      'nilspe-bepo-group-body';
 
     if (description) {
-      const info = document.createElement('p');
-
-      info.className =
-        'nilspe-bepo-help';
-
-      info.textContent = description;
-
-      content.append(info);
+      content.append(
+        el('p', 'nilspe-bepo-help', description)
+      );
     }
 
     details.append(summary, content);
 
-    return {
-      details,
-      content
-    };
+    return { details, content };
   }
 
-  function decorateSelect(
-    container,
-    select
-  ) {
-    const toolbar = document.createElement(
-      'div'
+  function decorateSelect(container, select) {
+    const toolbar = el(
+      'div',
+      'nilspe-bepo-toolbar'
     );
 
-    toolbar.className =
-      'nilspe-bepo-toolbar';
-
-    const clear = document.createElement(
-      'button'
+    const clear = el(
+      'button',
+      'btn btn-default btn-xs nilspe-bepo-bulk',
+      'Alle abwählen'
     );
 
     clear.type = 'button';
 
-    clear.className =
-      'btn btn-default btn-xs nilspe-bepo-bulk';
-
-    clear.textContent =
-      'Alle abwählen';
-
-    const count = document.createElement(
-      'span'
+    const count = el(
+      'span',
+      'nilspe-bepo-count'
     );
 
-    count.className =
-      'nilspe-bepo-count';
-
     function updateCount() {
-      const selected =
-        select.selectedOptions.length;
+      const selected = select.selectedOptions.length;
 
       count.textContent =
         `${selected} von ${select.options.length} ausgewählt`;
@@ -494,31 +723,21 @@
       );
     }
 
-    clear.addEventListener(
-      'click',
-      () => {
-        for (const option of select.options) {
-          option.selected = false;
-        }
-
-        refreshSelectpicker(select);
-
-        // Die Skriptbasis speichert über
-        // das reguläre change-Ereignis.
-        select.dispatchEvent(
-          new Event('change', {
-            bubbles: true
-          })
-        );
-
-        updateCount();
+    clear.addEventListener('click', () => {
+      for (const option of select.options) {
+        option.selected = false;
       }
-    );
 
-    select.addEventListener(
-      'change',
-      updateCount
-    );
+      refreshSelectpicker(select);
+
+      select.dispatchEvent(
+        new Event('change', { bubbles: true })
+      );
+
+      updateCount();
+    });
+
+    select.addEventListener('change', updateCount);
 
     const jq = pageJQuery();
 
@@ -529,14 +748,332 @@
       );
     }
 
-    toolbar.append(
-      clear,
-      count
-    );
-
+    toolbar.append(clear, count);
     container.append(toolbar);
 
     updateCount();
+  }
+
+  /*
+   * ==========================================
+   * MODUSAUSWAHL
+   * ==========================================
+   *
+   * Die Auswahl steht ganz oben.
+   *
+   * Beide Modi haben eigene Einstellungen.
+   * Gemeinsame Filter bleiben erhalten.
+   */
+
+  async function createModeSelector(
+    root,
+    untrainedGroup,
+    trainedGroup
+  ) {
+    const wrapper = el(
+      'div',
+      'nilspe-bepo-mode'
+    );
+
+    const untrainedButton = el(
+      'button',
+      'btn btn-default nilspe-bepo-mode-btn',
+      'Ohne Ausbildung'
+    );
+
+    const trainedButton = el(
+      'button',
+      'btn btn-default nilspe-bepo-mode-btn',
+      'Mit Ausbildung'
+    );
+
+    untrainedButton.type = 'button';
+    trainedButton.type = 'button';
+
+    const status = el(
+      'div',
+      'nilspe-bepo-mode-status'
+    );
+
+    const info = el(
+      'p',
+      'nilspe-bepo-mode-info'
+    );
+
+    wrapper.append(
+      untrainedButton,
+      trainedButton
+    );
+
+    root.append(wrapper, status, info);
+
+    let mode = await loadMode();
+
+    function renderMode() {
+      untrainedButton.classList.toggle(
+        'active',
+        mode === MODES.UNTRAINED
+      );
+
+      trainedButton.classList.toggle(
+        'active',
+        mode === MODES.TRAINED
+      );
+
+      untrainedGroup.details.style.display =
+        mode === MODES.UNTRAINED ? '' : 'none';
+
+      trainedGroup.details.style.display =
+        mode === MODES.TRAINED ? '' : 'none';
+
+      untrainedGroup.details.open =
+        mode === MODES.UNTRAINED;
+
+      trainedGroup.details.open =
+        mode === MODES.TRAINED;
+
+      info.textContent =
+        mode === MODES.UNTRAINED
+          ? 'Ohne Ausbildung: Die Zielwachen werden ' +
+            'bis zum eingestellten Gesamtpersonalbestand ' +
+            'aufgefüllt. Die Mindestpersonalwerte ' +
+            'der Quellwachen gelten.'
+          : 'Mit Ausbildung: Die eingestellten Mengen ' +
+            'werden pro BePo-Zielwache verschoben. ' +
+            'Die Mindestpersonalwerte werden ignoriert; ' +
+            'eine Person verbleibt je Quellwache.';
+    }
+
+    async function changeMode(nextMode) {
+      if (mode === nextMode) return;
+
+      const previousMode = mode;
+      mode = nextMode;
+
+      renderMode();
+
+      status.textContent = 'Speichere Modus ...';
+
+      try {
+        await saveMode(nextMode);
+        status.textContent = 'Modus gespeichert';
+      } catch (error) {
+        mode = previousMode;
+        renderMode();
+
+        status.textContent =
+          'Modus konnte nicht gespeichert werden';
+
+        console.error(PREFIX, error);
+      }
+    }
+
+    untrainedButton.addEventListener(
+      'click',
+      () => void changeMode(MODES.UNTRAINED)
+    );
+
+    trainedButton.addEventListener(
+      'click',
+      () => void changeMode(MODES.TRAINED)
+    );
+
+    renderMode();
+  }
+
+  /*
+   * ==========================================
+   * SECHS AUSBILDUNGSFELDER
+   * ==========================================
+   */
+
+  async function createTrainingSettings(content) {
+    if (
+      content.querySelector(
+        '#nilspe-bepo-training-settings'
+      )
+    ) {
+      return;
+    }
+
+    const root = el('div');
+    root.id = 'nilspe-bepo-training-settings';
+
+    const summary = el(
+      'div',
+      'nilspe-bepo-training-summary'
+    );
+
+    const status = el(
+      'div',
+      'nilspe-bepo-training-status'
+    );
+
+    const inputs = new Map();
+    const rows = new Map();
+
+    for (const education of EDUCATIONS) {
+      const row = el(
+        'div',
+        'nilspe-bepo-training-row'
+      );
+
+      const input = el(
+        'input',
+        'form-control nilspe-bepo-training-input'
+      );
+
+      input.type = 'number';
+      input.min = '0';
+      input.max = '400';
+      input.step = '1';
+      input.value = '0';
+
+      input.id =
+        `nilspe-bepo-training-${education.key}`;
+
+      const label = el(
+        'label',
+        'nilspe-bepo-training-label',
+        education.label
+      );
+
+      label.htmlFor = input.id;
+
+      row.append(input, label);
+      root.append(row);
+
+      inputs.set(education.key, input);
+      rows.set(education.key, row);
+    }
+
+    root.append(summary, status);
+    content.append(root);
+
+    for (const input of inputs.values()) {
+      input.disabled = true;
+    }
+
+    let counts;
+
+    try {
+      counts = await loadTrainingCounts();
+    } catch (error) {
+      status.textContent =
+        'Ausbildungswerte konnten nicht geladen werden.';
+
+      console.error(PREFIX, error);
+      return;
+    }
+
+    function updateSummary() {
+      let total = 0;
+      let active = 0;
+
+      for (const education of EDUCATIONS) {
+        const input = inputs.get(education.key);
+        const row = rows.get(education.key);
+
+        const amount = Math.max(
+          0,
+          Number(input.value) || 0
+        );
+
+        total += amount;
+
+        if (amount > 0) active++;
+
+        row.classList.toggle(
+          'active',
+          amount > 0
+        );
+      }
+
+      summary.textContent =
+        `${active} Ausbildungsarten aktiv · ` +
+        `${total} Personen pro Zielwache und Durchlauf`;
+    }
+
+    for (const education of EDUCATIONS) {
+      const input = inputs.get(education.key);
+
+      input.value = String(
+        counts[education.key] ?? 0
+      );
+
+      input.disabled = false;
+    }
+
+    let saveQueue = Promise.resolve();
+
+    function collectCounts() {
+      const next = {};
+
+      for (const education of EDUCATIONS) {
+        const input = inputs.get(education.key);
+        const raw = input.value;
+        const value = Number(raw);
+
+        if (
+          raw.trim() === '' ||
+          !Number.isInteger(value) ||
+          value < 0 ||
+          value > 400
+        ) {
+          throw new Error(
+            `Ungültiger Wert bei ${education.label}. ` +
+            'Erlaubt sind ganze Zahlen von 0 bis 400.'
+          );
+        }
+
+        next[education.key] = value;
+      }
+
+      return next;
+    }
+
+    function persist() {
+      let next;
+
+      try {
+        next = collectCounts();
+      } catch (error) {
+        status.textContent = error.message;
+        return;
+      }
+
+      updateSummary();
+      status.textContent = 'Speichere ...';
+
+      saveQueue = saveQueue
+        .catch(() => {})
+        .then(() => saveTrainingCounts(next))
+        .then(() => {
+          counts = next;
+          status.textContent = 'Gespeichert';
+        })
+        .catch(error => {
+          status.textContent =
+            'Speichern fehlgeschlagen';
+
+          console.error(PREFIX, error);
+        });
+    }
+
+    for (const input of inputs.values()) {
+      input.addEventListener(
+        'input',
+        updateSummary
+      );
+
+      input.addEventListener(
+        'change',
+        persist
+      );
+    }
+
+    updateSummary();
+    status.textContent = 'Ausbildungswerte geladen';
   }
 
   /*
@@ -548,116 +1085,103 @@
   function groupRenderedSettings() {
     const body = document.getElementById(
       SETTINGS_IDENTIFIER
-    )?.querySelector(
-      '.settings-tab-body'
-    );
+    )?.querySelector('.settings-tab-body');
 
-    if (!body) {
-      return false;
-    }
+    if (!body) return false;
 
     if (
-      body.querySelector(
-        '.nilspe-bepo-groups'
-      )
+      body.querySelector('.nilspe-bepo-groups')
     ) {
       return true;
     }
 
-    const definitions =
-      SETTINGS_DEFINITIONS.filter(
-        item => item.key
-      );
-
     const fields = new Map();
 
-    /*
-     * Erst dann umbauen, wenn ALLE
-     * Eingaben vollständig vorhanden sind.
-     */
+    for (const definition of SETTINGS_DEFINITIONS) {
+      if (!definition.key) continue;
 
-    for (const definition of definitions) {
       const field = findSettingField(
         body,
         definition.key
       );
 
-      if (!field) {
-        return false;
-      }
+      if (!field) return false;
 
-      fields.set(
-        definition.key,
-        field
-      );
+      fields.set(definition.key, field);
     }
 
     injectSettingsStyles();
 
-    const root = document.createElement(
-      'section'
+    const root = el(
+      'section',
+      'nilspe-bepo-groups'
     );
-
-    root.className =
-      'nilspe-bepo-groups';
-
-    const title = document.createElement(
-      'h2'
-    );
-
-    title.textContent =
-      'BePo-Personalwerber';
-
-    const info = document.createElement(
-      'p'
-    );
-
-    info.className =
-      'nilspe-bepo-help';
-
-    info.textContent =
-      'Unausgebildetes Personal auf ' +
-      'BePo-Zielwachen verteilen. ' +
-      'Mindestreserven und Ausschlüsse ' +
-      'werden berücksichtigt.';
 
     root.append(
-      title,
-      info
+      el('h2', '', 'BePo-Personalwerber')
     );
 
-    const groupDefinitions = [
+    const untrainedGroup = makeGroup(
+      'Ohne Ausbildung',
+      'Auf den gewünschten Gesamtpersonalbestand ' +
+      'auffüllen. Die Mindestpersonalwerte gelten.'
+    );
+
+    const trainedGroup = makeGroup(
+      'Mit Ausbildung',
+      'Feste Anzahl pro Ausbildung und Zielwache. ' +
+      'Die Mindestpersonalwerte gelten hier nicht.'
+    );
+
+    const commonGroup = makeGroup(
+      'Allgemein',
+      'Gemeinsame Anfragepause.'
+    );
+
+    const targetGroup = makeGroup(
+      'Zielwachen',
+      'Diese BePo-Wachen werden nicht bearbeitet.'
+    );
+
+    const sourceGroup = makeGroup(
+      'Quellwachen',
+      'Von diesen Wachen wird kein Personal entnommen.'
+    );
+
+    const dispatchGroup = makeGroup(
+      'Leitstellenfilter',
+      'Beide Filter gelten für die Personalquellen.'
+    );
+
+    const assignments = [
       {
-        title: 'Allgemein',
-        description:
-          'Zielpersonal, Mindestreserven und Anfragepause.',
+        group: untrainedGroup,
         keys: [
           KEYS.targetPersonnel,
           KEYS.policeReserve,
-          KEYS.bepoReserve,
+          KEYS.bepoReserve
+        ]
+      },
+      {
+        group: commonGroup,
+        keys: [
           KEYS.requestDelay
         ]
       },
       {
-        title: 'Zielwachen',
-        description:
-          'Diese BePo-Wachen werden nicht aufgefüllt.',
+        group: targetGroup,
         keys: [
           KEYS.excludedTargets
         ]
       },
       {
-        title: 'Quellwachen',
-        description:
-          'Von diesen Wachen wird kein Personal entnommen.',
+        group: sourceGroup,
         keys: [
           KEYS.excludedSources
         ]
       },
       {
-        title: 'Leitstellenfilter',
-        description:
-          'Beide Filter betreffen ausschließlich die Personalquellen.',
+        group: dispatchGroup,
         keys: [
           KEYS.excludedDispatchCenters,
           KEYS.limitedDispatchCenters
@@ -665,27 +1189,15 @@
       }
     ];
 
-    /*
-     * Die Original-Elemente umhängen.
-     * Alle Event-Listener bleiben erhalten.
-     */
-
-    for (const definition of groupDefinitions) {
-      const group = makeGroup(
-        definition.title,
-        definition.description
-      );
-
-      for (const key of definition.keys) {
+    for (const assignment of assignments) {
+      for (const key of assignment.keys) {
         const field = fields.get(key);
 
         field.container.classList.add(
           'nilspe-bepo-field'
         );
 
-        if (
-          field.control.tagName === 'SELECT'
-        ) {
+        if (field.control.tagName === 'SELECT') {
           field.container.classList.add(
             'nilspe-bepo-select'
           );
@@ -694,39 +1206,45 @@
             field.container,
             field.control
           );
-
         } else {
           field.container.classList.add(
-            'nilspe-bepo-number'
-          );
-
-          field.container.classList.add(
+            'nilspe-bepo-number',
             'selected'
           );
         }
 
-        group.content.append(
+        assignment.group.content.append(
           field.container
         );
       }
-
-      root.append(
-        group.details
-      );
     }
 
     /*
-     * Nur die alte Überschrift entfernen.
-     * Keine Formularfelder löschen.
+     * Modusauswahl oben.
+     * Die passende Einstellungsgruppe
+     * wird sichtbar gemacht.
      */
 
-    for (const child of Array.from(
-      body.children
-    )) {
+    const modeContainer = el('div');
+
+    root.append(
+      modeContainer,
+      untrainedGroup.details,
+      trainedGroup.details,
+      commonGroup.details,
+      targetGroup.details,
+      sourceGroup.details,
+      dispatchGroup.details
+    );
+
+    /*
+     * Nur die alte Überschrift entfernen.
+     * Die Originalfelder bleiben bestehen.
+     */
+
+    for (const child of [...body.children]) {
       if (
-        /^H[1-6]$/.test(
-          child.tagName
-        ) &&
+        /^H[1-6]$/.test(child.tagName) &&
         child.textContent.trim() ===
           'Allgemeine Einstellungen'
       ) {
@@ -736,28 +1254,35 @@
 
     body.prepend(root);
 
+    void createModeSelector(
+      modeContainer,
+      untrainedGroup,
+      trainedGroup
+    ).catch(error => {
+      console.error(
+        PREFIX,
+        'Modusauswahl konnte nicht geladen werden:',
+        error
+      );
+    });
+
+    void createTrainingSettings(
+      trainedGroup.content
+    ).catch(error => {
+      console.error(
+        PREFIX,
+        'Ausbildungsfelder konnten nicht geladen werden:',
+        error
+      );
+    });
+
     console.log(
       PREFIX,
-      `UI v${VERSION} geladen:`,
-      fields.size,
-      'Felder in vier Gruppen'
+      `Einstellungsoberfläche v${VERSION} geladen`
     );
 
     return true;
   }
-
-  /*
-   * ==========================================
-   * TAB-RENDERING BEOBACHTEN
-   * ==========================================
-   *
-   * addOptions() baut die Einstellungen
-   * erst beim Öffnen des Tabs auf.
-   *
-   * Die Gruppierung wird deshalb sowohl
-   * bei Direktaufruf per Hash als auch
-   * beim normalen Tabwechsel ausgeführt.
-   */
 
   async function createSettings() {
     if (typeof addOptions !== 'function') {
@@ -765,7 +1290,6 @@
         PREFIX,
         'NilsPe-Skriptbasis fehlt.'
       );
-
       return;
     }
 
@@ -777,25 +1301,14 @@
 
     const body = document.getElementById(
       SETTINGS_IDENTIFIER
-    )?.querySelector(
-      '.settings-tab-body'
-    );
+    )?.querySelector('.settings-tab-body');
 
-    if (!body) {
-      console.error(
-        PREFIX,
-        'Einstellungscontainer fehlt.'
-      );
-
-      return;
-    }
+    if (!body) return;
 
     let scheduled = false;
 
     const observer = new MutationObserver(() => {
-      if (scheduled) {
-        return;
-      }
+      if (scheduled) return;
 
       scheduled = true;
 
@@ -807,7 +1320,7 @@
         } catch (error) {
           console.error(
             PREFIX,
-            'UI-Gruppierung fehlgeschlagen:',
+            'Einstellungsoberfläche fehlgeschlagen:',
             error
           );
         }
@@ -823,269 +1336,6 @@
 
   /*
    * ==========================================
-   * GEBÄUDE / KONTEXT
-   * ==========================================
-   */
-
-  function currentBuildingId() {
-    const match = location.pathname.match(
-      /^\/buildings\/(\d+)/
-    );
-
-    return match
-      ? Number(match[1])
-      : null;
-  }
-
-  function currentBuildingType() {
-    return Number(
-      document.querySelector(
-        'h1[building_type]'
-      )?.getAttribute(
-        'building_type'
-      )
-    );
-  }
-
-  function csrfToken() {
-    return document.querySelector(
-      'meta[name="csrf-token"]'
-    )?.content ?? '';
-  }
-
-  /*
-   * ==========================================
-   * FORTSCHRITTSANZEIGE
-   * ==========================================
-   */
-
-  function ensureProgressUi() {
-    if (
-      document.getElementById(
-        'nilspe-bepo-progress'
-      )
-    ) {
-      return;
-    }
-
-    const style = document.createElement(
-      'style'
-    );
-
-    style.id = 'nilspe-bepo-style';
-
-    style.textContent = `
-      #nilspe-bepo-progress {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 2147483000;
-        padding: 7px 12px;
-        border-top: 1px solid #ddd;
-        background: #f8f8f8;
-      }
-
-      #nilspe-bepo-track {
-        height: 12px;
-        margin-top: 5px;
-        overflow: hidden;
-        border-radius: 4px;
-        background: #ddd;
-      }
-
-      #nilspe-bepo-fill {
-        height: 100%;
-        width: 0;
-        background: #5cb85c;
-      }
-    `;
-
-    document.head.append(style);
-
-    const container = document.createElement(
-      'div'
-    );
-
-    container.id =
-      'nilspe-bepo-progress';
-
-    const row = document.createElement(
-      'div'
-    );
-
-    row.style.cssText =
-      'display:flex;align-items:center;gap:12px';
-
-    const stopButton = document.createElement(
-      'button'
-    );
-
-    stopButton.type = 'button';
-    stopButton.className =
-      'btn btn-default btn-xs';
-    stopButton.textContent =
-      'Abbrechen';
-
-    stopButton.addEventListener(
-      'click',
-      stopRun
-    );
-
-    const status = document.createElement(
-      'span'
-    );
-
-    status.id =
-      'nilspe-bepo-status';
-
-    status.className =
-      'label label-info';
-
-    status.textContent =
-      'Bereit';
-
-    row.append(
-      stopButton,
-      status
-    );
-
-    const track = document.createElement(
-      'div'
-    );
-
-    track.id =
-      'nilspe-bepo-track';
-
-    const fill = document.createElement(
-      'div'
-    );
-
-    fill.id =
-      'nilspe-bepo-fill';
-
-    track.append(fill);
-
-    container.append(
-      row,
-      track
-    );
-
-    document.body.append(
-      container
-    );
-  }
-
-  function setProgress(
-    message,
-    completed = 0,
-    total = 0,
-    type = 'info'
-  ) {
-    ensureProgressUi();
-
-    const status = document.getElementById(
-      'nilspe-bepo-status'
-    );
-
-    const fill = document.getElementById(
-      'nilspe-bepo-fill'
-    );
-
-    status.className =
-      `label label-${type}`;
-
-    status.textContent = message;
-
-    fill.style.width =
-      total > 0
-        ? `${completed / total * 100}%`
-        : '0%';
-  }
-
-  /*
-   * ==========================================
-   * LAUFSPERRE
-   * ==========================================
-   */
-
-  async function stopRun(
-    message = 'Abgebrochen',
-    type = 'danger'
-  ) {
-    if (SESSION_RUN_KEY) {
-      sessionStorage.removeItem(
-        SESSION_RUN_KEY
-      );
-    }
-
-    if (RUN_LOCK_KEY) {
-      await GM.deleteValue(
-        RUN_LOCK_KEY
-      );
-    }
-
-    setProgress(
-      message,
-      0,
-      0,
-      type
-    );
-  }
-
-  function runIsActive() {
-    return SESSION_RUN_KEY !== null &&
-      sessionStorage.getItem(
-        SESSION_RUN_KEY
-      ) === 'true';
-  }
-
-  async function acquireRunLock() {
-    if (
-      !RUN_LOCK_KEY ||
-      !SESSION_RUN_KEY
-    ) {
-      await initializeAccountKeys();
-    }
-
-    const globalLock = await GM.getValue(
-      RUN_LOCK_KEY,
-      false
-    );
-
-    if (
-      globalLock &&
-      !runIsActive()
-    ) {
-      console.warn(
-        PREFIX,
-        'Verwaister Run-Lock gefunden und entfernt.'
-      );
-
-      await GM.deleteValue(
-        RUN_LOCK_KEY
-      );
-    }
-
-    if (runIsActive()) {
-      return false;
-    }
-
-    sessionStorage.setItem(
-      SESSION_RUN_KEY,
-      'true'
-    );
-
-    await GM.setValue(
-      RUN_LOCK_KEY,
-      true
-    );
-
-    return true;
-  }
-
-  /*
-   * ==========================================
    * GEBÄUDE LADEN
    * ==========================================
    */
@@ -1094,24 +1344,18 @@
     const db = await openDb();
 
     try {
-      await updateBuildings(
-        db,
-        60
-      );
+      await updateBuildings(db, 60);
 
-      return (
-        await getAllData(
-          db,
-          'buildings'
-        )
-      )
+      return (await getAllData(
+        db,
+        'buildings'
+      ))
         .map(normalizeBuilding)
         .filter(building =>
-          [6, 11].includes(
+          SOURCE_TYPES.includes(
             building.building_type
           )
         );
-
     } finally {
       db.close();
     }
@@ -1119,20 +1363,14 @@
 
   /*
    * ==========================================
-   * KONFIGURATION LADEN
+   * KONFIGURATION
    * ==========================================
    */
 
   async function loadConfiguration() {
-    const numberValue = async (
-      key,
-      fallback
-    ) => {
+    const numberValue = async (key, fallback) => {
       const value = Number(
-        await GM.getValue(
-          key,
-          fallback
-        )
+        await GM.getValue(key, fallback)
       );
 
       return Number.isFinite(value)
@@ -1141,11 +1379,12 @@
     };
 
     return {
-      targetPersonnel:
-        await numberValue(
-          KEYS.targetPersonnel,
-          0
-        ),
+      mode: await loadMode(),
+
+      targetPersonnel: await numberValue(
+        KEYS.targetPersonnel,
+        0
+      ),
 
       policeReserve: Math.max(
         await numberValue(
@@ -1170,6 +1409,8 @@
         ),
         0
       ),
+
+      trainingCounts: await loadTrainingCounts(),
 
       excludedTargets: new Set(
         await storedArray(
@@ -1201,30 +1442,28 @@
    * ==========================================
    * ZIELWACHEN
    * ==========================================
+   *
+   * Beide Modi verwenden dieselben
+   * Zielwachen und Zielwachen-Ausschlüsse.
    */
 
   function selectTargets(
     buildings,
-    configuration,
+    config,
     context
   ) {
     return buildings
       .filter(building =>
-        building.building_type === 11
+        building.building_type === TARGET_TYPE
       )
       .filter(building =>
-        !configuration.excludedTargets.has(
+        !config.excludedTargets.has(
           building.id
         )
       )
       .filter(building => {
-        if (
-          context.buildingId !== null
-        ) {
-          return (
-            building.id ===
-            context.buildingId
-          );
+        if (context.buildingId !== null) {
+          return building.id === context.buildingId;
         }
 
         return (
@@ -1232,73 +1471,70 @@
           context.dispatchCenterId
         );
       })
-      .map(building => ({
-        ...building,
-
-        needed: Math.max(
-          configuration.targetPersonnel -
-          building.personal_count,
-          0
-        )
-      }))
-      .filter(building =>
-        building.needed > 0
-      )
-      .sort((a, b) =>
-        a.id - b.id
-      );
+      .sort((a, b) => a.id - b.id);
   }
 
   /*
    * ==========================================
    * QUELLWACHEN
    * ==========================================
+   *
+   * OHNE AUSBILDUNG:
+   *   Polizei-Mindestpersonal
+   *   BePo-Mindestpersonal
+   *
+   * MIT AUSBILDUNG:
+   *   Mindestpersonal ignorieren.
+   *   Nur eine Person verbleibt.
    */
 
-  function selectSources(
-    buildings,
-    configuration
-  ) {
+  function reserveForBuilding(building, config) {
+    if (config.mode === MODES.TRAINED) {
+      return TRAINED_SOURCE_RESERVE;
+    }
+
+    return building.building_type === 11
+      ? config.bepoReserve
+      : config.policeReserve;
+  }
+
+  function selectSources(buildings, config) {
     const limited =
-      configuration.limitedDispatchCenters.size > 0;
+      config.limitedDispatchCenters.size > 0;
 
     return buildings
       .filter(building =>
-        !configuration.excludedSources.has(
+        !config.excludedSources.has(
           building.id
         )
       )
       .filter(building =>
-        !configuration.excludedDispatchCenters.has(
+        !config.excludedDispatchCenters.has(
           building.leitstelle_building_id
         )
       )
       .filter(building =>
         !limited ||
-        configuration.limitedDispatchCenters.has(
+        config.limitedDispatchCenters.has(
           building.leitstelle_building_id
         )
       )
       .map(building => {
-        const reserve =
-          building.building_type === 11
-            ? configuration.bepoReserve
-            : configuration.policeReserve;
+        const reserve = reserveForBuilding(
+          building,
+          config
+        );
 
         return {
           ...building,
           reserve,
-
           available: Math.max(
-            building.personal_count -
-            reserve,
+            building.personal_count - reserve,
             0
           )
         };
       })
-      .filter(building =>
-        building.available > 0
-      )
+      .filter(building => building.available > 0)
       .sort((a, b) =>
         b.available - a.available ||
         a.id - b.id
@@ -1307,242 +1543,210 @@
 
   /*
    * ==========================================
-   * UNAUSGEBILDETES PERSONAL
+   * PERSONALLISTEN
    * ==========================================
    */
 
-  function untrainedPersonnelIds(
-    documentFromResponse,
-    sourceBuildingId
-  ) {
-    const table =
-      documentFromResponse.getElementById(
-        `personal_table_${sourceBuildingId}`
-      ) ??
-      documentFromResponse.querySelector(
-        'table'
-      );
+  function personnelTable(doc, buildingId) {
+    return doc.getElementById(
+      `personal_table_${buildingId}`
+    ) ?? doc.querySelector('table');
+  }
 
-    if (!table) {
-      return [];
+  function countPersonnel(doc, buildingId) {
+    const table = personnelTable(
+      doc,
+      buildingId
+    );
+
+    return table
+      ? table.querySelectorAll('tbody tr').length
+      : null;
+  }
+
+  async function loadPersonnelDocument(buildingId) {
+    const response = await fetch(
+      `/buildings/${buildingId}/schooling_personal_select`,
+      {
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRF-Token': csrfToken()
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Personalliste HTTP ${response.status}`
+      );
     }
 
-    const personnelIds = [];
+    return new DOMParser().parseFromString(
+      await response.text(),
+      'text/html'
+    );
+  }
+
+  /*
+   * ==========================================
+   * PERSONAL FILTERN
+   * ==========================================
+   *
+   * Die bisherige Tabellenstruktur wird
+   * weiterhin verwendet:
+   *
+   * td[0] = Personal-ID
+   * td[2] = Ausbildung
+   * td[3] = laufender Lehrgang
+   *
+   * Personen in laufender Ausbildung
+   * werden nicht verschoben.
+   */
+
+  function matchingPersonnelIds(
+    doc,
+    buildingId,
+    educationKey
+  ) {
+    const table = personnelTable(
+      doc,
+      buildingId
+    );
+
+    if (!table) return [];
+
+    let accepted;
+
+    if (educationKey === 'untrained') {
+      accepted = new Set(['']);
+    } else {
+      const education = EDUCATIONS.find(
+        item => item.key === educationKey
+      );
+
+      if (!education) {
+        throw new Error(
+          `Unbekannte Ausbildung: ${educationKey}`
+        );
+      }
+
+      accepted = new Set(
+        education.aliases.map(normalizeText)
+      );
+    }
+
+    const ids = [];
 
     for (const row of table.querySelectorAll(
       'tbody tr'
     )) {
-      const cells = row.querySelectorAll(
-        'td'
-      );
+      const cells = row.querySelectorAll('td');
 
       const input = cells[0]?.querySelector(
         'input[value]'
       );
 
-      const schooling =
-        cells[2]?.textContent.trim() ?? '';
+      if (!input?.value) continue;
 
-      const course =
-        cells[3]?.textContent.trim() ?? '';
+      const schoolingCell = cells[2];
+      const courseCell = cells[3];
 
-      if (
-        input &&
-        schooling === '' &&
-        course === ''
-      ) {
-        personnelIds.push(
-          input.value
-        );
+      if (!schoolingCell || !courseCell) {
+        continue;
+      }
+
+      const schooling = normalizeText(
+        schoolingCell.textContent
+      );
+
+      const currentCourse = normalizeText(
+        courseCell.textContent
+      );
+
+      if (currentCourse !== '') {
+        continue;
+      }
+
+      if (accepted.has(schooling)) {
+        ids.push(input.value);
       }
     }
 
-    return personnelIds;
-  }
-
-  function personnelCountFromDocument(
-    documentFromResponse,
-    buildingId
-  ) {
-    const table =
-      documentFromResponse.getElementById(
-        `personal_table_${buildingId}`
-      ) ??
-      documentFromResponse.querySelector(
-        'table'
-      );
-
-    if (!table) {
-      return null;
-    }
-
-    return table.querySelectorAll(
-      'tbody tr'
-    ).length;
+    return ids;
   }
 
   /*
    * ==========================================
-   * LIVE-PERSONALZÄHLUNG
+   * PERSONALQUELLE LADEN
    * ==========================================
+   *
+   * Quellbestand wird live gezählt.
+   * Die gewählte Reserve wird beachtet.
+   *
+   * Im Ausbildungsmodus ist die Reserve 1.
    */
 
-  async function livePersonnelCount(
-    buildingId
+  async function sourcePersonnelPool(
+    source,
+    allPools
   ) {
-    const response = await fetch(
-      `/buildings/${buildingId}/schooling_personal_select`,
-      {
-        credentials: 'same-origin',
+    if (allPools.has(source.id)) {
+      return allPools.get(source.id);
+    }
 
-        headers: {
-          'X-Requested-With':
-            'XMLHttpRequest',
-
-          'X-CSRF-Token':
-            csrfToken()
-        }
-      }
+    const doc = await loadPersonnelDocument(
+      source.id
     );
 
-    if (!response.ok) {
+    const liveCount = countPersonnel(
+      doc,
+      source.id
+    );
+
+    if (!Number.isInteger(liveCount)) {
       throw new Error(
-        `Personalzählung HTTP ${response.status}`
+        'Personalbestand konnte nicht ermittelt werden.'
       );
     }
 
-    const documentFromResponse =
-      new DOMParser().parseFromString(
-        await response.text(),
-        'text/html'
-      );
+    source.personal_count = liveCount;
 
-    return personnelCountFromDocument(
-      documentFromResponse,
-      buildingId
-    );
-  }
-
-  async function refreshTargetNeed(
-    target,
-    configuration
-  ) {
-    try {
-      const liveCount =
-        await livePersonnelCount(
-          target.id
-        );
-
-      if (
-        Number.isInteger(liveCount)
-      ) {
-        target.personal_count =
-          liveCount;
-
-        target.needed = Math.max(
-          configuration.targetPersonnel -
-          target.personal_count,
-          0
-        );
-      }
-
-    } catch (error) {
-      console.warn(
-        PREFIX,
-        'Ziel-Personalzählung fehlgeschlagen:',
-        target.id,
-        error
-      );
-    }
-
-    return target.needed;
-  }
-
-  /*
-   * ==========================================
-   * VERFÜGBARES PERSONAL
-   * ==========================================
-   */
-
-  async function availablePersonnelIds(
-    sourceBuilding
-  ) {
-    const response = await fetch(
-      `/buildings/${sourceBuilding.id}/schooling_personal_select`,
-      {
-        credentials: 'same-origin',
-
-        headers: {
-          'X-Requested-With':
-            'XMLHttpRequest',
-
-          'X-CSRF-Token':
-            csrfToken()
-        }
-      }
+    source.available = Math.max(
+      Math.min(
+        source.available,
+        liveCount - source.reserve
+      ),
+      0
     );
 
-    if (!response.ok) {
-      throw new Error(
-        `${sourceBuilding.caption}: ` +
-        `Personalabfrage HTTP ${response.status}`
-      );
-    }
+    const byEducation = new Map();
 
-    const documentFromResponse =
-      new DOMParser().parseFromString(
-        await response.text(),
-        'text/html'
-      );
+    byEducation.set(
+      'untrained',
+      matchingPersonnelIds(
+        doc,
+        source.id,
+        'untrained'
+      )
+    );
 
-    const personnelIds =
-      untrainedPersonnelIds(
-        documentFromResponse,
-        sourceBuilding.id
-      );
-
-    const liveCount =
-      personnelCountFromDocument(
-        documentFromResponse,
-        sourceBuilding.id
-      );
-
-    const liveAvailable =
-      Number.isInteger(liveCount)
-        ? Math.max(
-          liveCount -
-          sourceBuilding.reserve,
-          0
+    for (const education of EDUCATIONS) {
+      byEducation.set(
+        education.key,
+        matchingPersonnelIds(
+          doc,
+          source.id,
+          education.key
         )
-        : sourceBuilding.available;
-
-    if (
-      Number.isInteger(liveCount)
-    ) {
-      sourceBuilding.personal_count =
-        liveCount;
-
-      sourceBuilding.available =
-        Math.min(
-          sourceBuilding.available,
-          liveAvailable
-        );
+      );
     }
 
-    const allowed = Math.min(
-      sourceBuilding.available,
-      liveAvailable,
-      personnelIds.length
-    );
+    const pool = { byEducation };
 
-    if (allowed <= 0) {
-      return [];
-    }
+    allPools.set(source.id, pool);
 
-    return personnelIds.slice(
-      0,
-      allowed
-    );
+    return pool;
   }
 
   /*
@@ -1555,6 +1759,8 @@
     targetBuildingId,
     personnelIds
   ) {
+    if (!personnelIds.length) return;
+
     const token = csrfToken();
 
     if (!token) {
@@ -1565,27 +1771,14 @@
 
     const form = new URLSearchParams();
 
-    form.append(
-      'utf8',
-      '✓'
-    );
+    form.append('utf8', '✓');
+    form.append('authenticity_token', token);
 
-    form.append(
-      'authenticity_token',
-      token
-    );
-
-    for (const personnelId of personnelIds) {
-      form.append(
-        'personal_ids[]',
-        personnelId
-      );
+    for (const id of personnelIds) {
+      form.append('personal_ids[]', id);
     }
 
-    form.append(
-      'commit',
-      'Personal übernehmen'
-    );
+    form.append('commit', 'Personal übernehmen');
 
     const response = await fetch(
       `/buildings/${targetBuildingId}/adopt`,
@@ -1597,9 +1790,7 @@
       }
     );
 
-    if (
-      response.status >= 400
-    ) {
+    if (response.status >= 400) {
       throw new Error(
         `Personalübernahme HTTP ${response.status}`
       );
@@ -1608,68 +1799,45 @@
 
   /*
    * ==========================================
-   * QUELLEN SYNCHRONISIEREN
+   * QUELLEN NACH TRANSFER AKTUALISIEREN
    * ==========================================
    */
 
-  function syncSourceEntryForTarget(
+  function updateSourceCounts(
     sources,
-    target
-  ) {
-    const sourceEntry =
-      sources.find(source =>
-        source.id === target.id
-      );
-
-    if (!sourceEntry) {
-      return;
-    }
-
-    sourceEntry.personal_count =
-      target.personal_count;
-
-    sourceEntry.available = Math.max(
-      sourceEntry.personal_count -
-      sourceEntry.reserve,
-      0
-    );
-  }
-
-  function applySuccessfulTransfer(
     target,
-    sources,
-    selections,
+    reservations,
     transferred
   ) {
-    target.personal_count +=
-      transferred;
+    target.personal_count += transferred;
 
-    target.needed = Math.max(
-      target.needed -
-      transferred,
-      0
+    const targetSource = sources.find(
+      source => source.id === target.id
     );
 
-    syncSourceEntryForTarget(
-      sources,
-      target
-    );
+    if (targetSource) {
+      targetSource.personal_count += transferred;
 
-    for (
-      const { source, ids }
-      of selections
-    ) {
+      /*
+       * Neu eingetroffene Personen werden
+       * nicht in bereits geladene Quellen-
+       * Pools aufgenommen.
+       */
+    }
+
+    for (const reservation of reservations) {
+      const source = reservation.source;
+
       source.personal_count = Math.max(
         source.personal_count -
-        ids.length,
+        reservation.ids.length,
         0
       );
 
       source.available = Math.max(
         Math.min(
           source.available,
-          source.personal_count -
-          source.reserve
+          source.personal_count - source.reserve
         ),
         0
       );
@@ -1678,24 +1846,33 @@
 
   /*
    * ==========================================
-   * ZIELWACHE AUFFÜLLEN
+   * PERSONAL VERSCHIEBEN
    * ==========================================
+   *
+   * Verwendet in beiden Modi dieselbe
+   * Übernahmelogik.
+   *
+   * Unterschiedlich sind:
+   *   - gesuchte Ausbildung
+   *   - benötigte Menge
+   *   - Quellreserve
    */
 
-  async function fillTarget(
+  async function fillEducation(
     target,
+    educationKey,
+    wanted,
     sources,
-    requestDelay,
-    personnelPools
+    config,
+    allPools
   ) {
-    const selectedPersonnel = [];
-    const selections = [];
+    const selectedIds = [];
+    const reservations = [];
 
     for (const source of sources) {
       if (
         !runIsActive() ||
-        selectedPersonnel.length >=
-          target.needed
+        selectedIds.length >= wanted
       ) {
         break;
       }
@@ -1708,118 +1885,434 @@
       }
 
       try {
-        if (
-          !personnelPools.has(
-            source.id
-          )
-        ) {
-          personnelPools.set(
-            source.id,
-            await availablePersonnelIds(
-              source
-            )
-          );
-        }
-
-        const pool =
-          personnelPools.get(
-            source.id
-          );
-
-        const count = Math.min(
-          target.needed -
-          selectedPersonnel.length,
-          source.available,
-          pool.length
+        const pool = await sourcePersonnelPool(
+          source,
+          allPools
         );
 
-        const ids = pool.splice(
+        const availableIds =
+          pool.byEducation.get(educationKey) ?? [];
+
+        const count = Math.min(
+          wanted - selectedIds.length,
+          source.available,
+          availableIds.length
+        );
+
+        if (count <= 0) continue;
+
+        const ids = availableIds.splice(
           0,
           count
         );
 
-        if (
-          ids.length === 0
-        ) {
-          source.available = 0;
-          continue;
-        }
+        selectedIds.push(...ids);
 
-        selectedPersonnel.push(
-          ...ids
-        );
-
-        selections.push({
+        reservations.push({
           source,
-          pool,
+          availableIds,
           ids
         });
 
-        source.available -=
-          ids.length;
-
-        if (
-          selectedPersonnel.length >=
-          target.needed
-        ) {
-          break;
-        }
+        source.available -= ids.length;
 
       } catch (error) {
         console.warn(
           PREFIX,
-          'Quelle übersprungen:',
+          'Quellwache übersprungen:',
+          source.id,
+          educationKey,
           error
         );
       }
 
-      if (requestDelay > 0) {
-        await sleep(
-          requestDelay
-        );
+      if (config.requestDelay > 0) {
+        await sleep(config.requestDelay);
       }
     }
 
-    if (
-      selectedPersonnel.length === 0
-    ) {
+    /*
+     * Bei Abbruch vor der Übernahme
+     * alle reservierten IDs freigeben.
+     */
+
+    if (!selectedIds.length || !runIsActive()) {
+      for (const reservation of reservations) {
+        reservation.availableIds.unshift(
+          ...reservation.ids
+        );
+
+        reservation.source.available +=
+          reservation.ids.length;
+      }
+
       return 0;
     }
 
     try {
       await adoptPersonnel(
         target.id,
-        selectedPersonnel
+        selectedIds
       );
-
     } catch (error) {
-      for (
-        const {
-          source,
-          pool,
-          ids
-        }
-        of selections.reverse()
-      ) {
-        pool.unshift(
-          ...ids
+      for (const reservation of reservations) {
+        reservation.availableIds.unshift(
+          ...reservation.ids
         );
 
-        source.available +=
-          ids.length;
+        reservation.source.available +=
+          reservation.ids.length;
       }
 
       throw error;
     }
 
-    applySuccessfulTransfer(
-      target,
+    updateSourceCounts(
       sources,
-      selections,
-      selectedPersonnel.length
+      target,
+      reservations,
+      selectedIds.length
     );
 
-    return selectedPersonnel.length;
+    return selectedIds.length;
+  }
+
+  /*
+   * ==========================================
+   * MODUS 1: OHNE AUSBILDUNG
+   * ==========================================
+   *
+   * Gesamtpersonal-Sollwert.
+   * Quellreserven gelten.
+   */
+
+  async function fillTargetUntrained(
+    target,
+    sources,
+    config,
+    allPools
+  ) {
+    try {
+      const doc = await loadPersonnelDocument(
+        target.id
+      );
+
+      const liveCount = countPersonnel(
+        doc,
+        target.id
+      );
+
+      if (Number.isInteger(liveCount)) {
+        target.personal_count = liveCount;
+      }
+    } catch (error) {
+      console.warn(
+        PREFIX,
+        'Live-Zielbestand nicht geladen:',
+        target.id,
+        error
+      );
+    }
+
+    const wanted = Math.max(
+      config.targetPersonnel -
+      target.personal_count,
+      0
+    );
+
+    if (wanted <= 0) {
+      return {
+        transferred: 0,
+        missing: 0
+      };
+    }
+
+    const transferred = await fillEducation(
+      target,
+      'untrained',
+      wanted,
+      sources,
+      config,
+      allPools
+    );
+
+    return {
+      transferred,
+      missing: runIsActive()
+        ? Math.max(wanted - transferred, 0)
+        : 0
+    };
+  }
+
+  /*
+   * ==========================================
+   * MODUS 2: MIT AUSBILDUNG
+   * ==========================================
+   *
+   * Alle sechs Ausbildungsmengen werden
+   * für jede Zielwache abgearbeitet.
+   *
+   * Kein Soll-Ist-Abgleich.
+   * Keine regulären Mindestpersonalwerte.
+   * Eine Person pro Quelle verbleibt.
+   */
+
+  async function fillTargetTrained(
+    target,
+    sources,
+    config,
+    allPools
+  ) {
+    let transferred = 0;
+    let missing = 0;
+
+    for (const education of EDUCATIONS) {
+      if (!runIsActive()) break;
+
+      const wanted = Number(
+        config.trainingCounts[education.key] ?? 0
+      );
+
+      if (wanted <= 0) continue;
+
+      const moved = await fillEducation(
+        target,
+        education.key,
+        wanted,
+        sources,
+        config,
+        allPools
+      );
+
+      transferred += moved;
+
+      if (runIsActive()) {
+        const shortage = Math.max(
+          wanted - moved,
+          0
+        );
+
+        missing += shortage;
+
+        if (shortage > 0) {
+          console.warn(
+            PREFIX,
+            'Fehlmenge:',
+            target.caption,
+            education.label,
+            `Gewünscht: ${wanted}`,
+            `Übernommen: ${moved}`
+          );
+        }
+      }
+    }
+
+    return { transferred, missing };
+  }
+
+  /*
+   * ==========================================
+   * LAUFSPERRE
+   * ==========================================
+   */
+
+  function runIsActive() {
+    return running && !cancelRequested;
+  }
+
+  async function acquireRunLock() {
+    if (!RUN_LOCK_KEY || !SESSION_RUN_KEY) {
+      await initializeAccountKeys();
+    }
+
+    if (running) return false;
+
+    const existing = await GM.getValue(
+      RUN_LOCK_KEY,
+      false
+    );
+
+    if (existing) {
+      console.warn(
+        PREFIX,
+        'Vorhandene Laufsperre erkannt.'
+      );
+      return false;
+    }
+
+    running = true;
+    cancelRequested = false;
+
+    sessionStorage.setItem(
+      SESSION_RUN_KEY,
+      'true'
+    );
+
+    try {
+      await GM.setValue(RUN_LOCK_KEY, true);
+    } catch (error) {
+      running = false;
+
+      sessionStorage.removeItem(
+        SESSION_RUN_KEY
+      );
+
+      throw error;
+    }
+
+    return true;
+  }
+
+  async function stopRun(
+    message = 'Abgebrochen',
+    type = 'warning'
+  ) {
+    cancelRequested = true;
+    running = false;
+
+    if (SESSION_RUN_KEY) {
+      sessionStorage.removeItem(
+        SESSION_RUN_KEY
+      );
+    }
+
+    if (RUN_LOCK_KEY) {
+      await GM.deleteValue(
+        RUN_LOCK_KEY
+      );
+    }
+
+    setProgress(
+      message,
+      0,
+      0,
+      type
+    );
+  }
+
+  /*
+   * ==========================================
+   * FORTSCHRITTSANZEIGE
+   * ==========================================
+   */
+
+  function ensureProgressUi() {
+    if (
+      document.getElementById(
+        'nilspe-bepo-progress'
+      )
+    ) {
+      return;
+    }
+
+    const style = el('style');
+    style.id = 'nilspe-bepo-progress-style';
+
+    style.textContent = `
+      #nilspe-bepo-progress {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2147483000;
+        padding: 7px 12px;
+        border-top: 1px solid #ddd;
+        background: #f8f8f8;
+      }
+
+      #nilspe-bepo-track {
+        height: 12px;
+        margin-top: 5px;
+        overflow: hidden;
+        border-radius: 4px;
+        background: #ddd;
+      }
+
+      #nilspe-bepo-fill {
+        height: 100%;
+        width: 0;
+        background: #5cb85c;
+      }
+    `;
+
+    document.head.append(style);
+
+    const container = el('div');
+    container.id = 'nilspe-bepo-progress';
+
+    const row = el('div');
+    row.style.cssText =
+      'display:flex;align-items:center;gap:12px';
+
+    const cancelButton = el(
+      'button',
+      'btn btn-default btn-xs',
+      'Abbrechen'
+    );
+
+    cancelButton.type = 'button';
+
+    cancelButton.addEventListener('click', () => {
+      cancelRequested = true;
+
+      const status = document.getElementById(
+        'nilspe-bepo-status'
+      );
+
+      if (status) {
+        status.className = 'label label-warning';
+        status.textContent =
+          'Abbruch angefordert';
+      }
+    });
+
+    const status = el(
+      'span',
+      'label label-info',
+      'Bereit'
+    );
+
+    status.id = 'nilspe-bepo-status';
+
+    const track = el('div');
+    track.id = 'nilspe-bepo-track';
+
+    const fill = el('div');
+    fill.id = 'nilspe-bepo-fill';
+
+    track.append(fill);
+
+    row.append(cancelButton, status);
+    container.append(row, track);
+
+    document.body.append(container);
+  }
+
+  function setProgress(
+    message,
+    completed = 0,
+    total = 0,
+    type = 'info'
+  ) {
+    ensureProgressUi();
+
+    const status = document.getElementById(
+      'nilspe-bepo-status'
+    );
+
+    const fill = document.getElementById(
+      'nilspe-bepo-fill'
+    );
+
+    status.className = `label label-${type}`;
+    status.textContent = message;
+
+    fill.style.width = total > 0
+      ? `${Math.min(
+          100,
+          completed / total * 100
+        )}%`
+      : '0%';
   }
 
   /*
@@ -1829,47 +2322,57 @@
    */
 
   async function runRecruiter() {
+    if (!await acquireRunLock()) {
+      setProgress(
+        'Personalwerber läuft bereits.',
+        0,
+        0,
+        'warning'
+      );
+      return;
+    }
+
     try {
-      if (
-        !await acquireRunLock()
-      ) {
-        setProgress(
-          'Personalwerber läuft bereits.',
-          0,
-          0,
-          'warning'
-        );
-
-        return;
-      }
-
       setProgress(
         'Gebäude werden geladen ...'
       );
 
-      const configuration =
-        await loadConfiguration();
+      const config = await loadConfiguration();
 
-      if (
-        configuration.targetPersonnel <= 0
-      ) {
-        throw new Error(
-          'Das Zielpersonal ist nicht größer als 0.'
+      if (config.mode === MODES.UNTRAINED) {
+        if (
+          !Number.isInteger(config.targetPersonnel) ||
+          config.targetPersonnel <= 0
+        ) {
+          throw new Error(
+            'Bitte ein Zielpersonal größer als 0 einstellen.'
+          );
+        }
+      } else {
+        const activeCount = EDUCATIONS.reduce(
+          (sum, education) =>
+            sum + Number(
+              config.trainingCounts[education.key] ?? 0
+            ),
+          0
         );
+
+        if (activeCount <= 0) {
+          throw new Error(
+            'Bitte mindestens eine Ausbildung ' +
+            'mit einer Anzahl größer als 0 aktivieren.'
+          );
+        }
       }
 
-      const buildings =
-        await loadBuildings();
+      const buildings = await loadBuildings();
 
-      const type =
-        currentBuildingType();
-
-      const id =
-        currentBuildingId();
+      const type = currentBuildingType();
+      const id = currentBuildingId();
 
       const context = {
         buildingId:
-          type === 11
+          type === TARGET_TYPE
             ? id
             : null,
 
@@ -1879,49 +2382,58 @@
             : null
       };
 
-      const targets =
-        selectTargets(
-          buildings,
-          configuration,
-          context
-        );
+      const targets = selectTargets(
+        buildings,
+        config,
+        context
+      );
 
-      const sources =
-        selectSources(
-          buildings,
-          configuration
-        );
+      const sources = selectSources(
+        buildings,
+        config
+      );
 
-      if (
-        targets.length === 0
-      ) {
+      if (!targets.length) {
         await stopRun(
-          'Keine BePo-Wache muss aufgefüllt werden',
+          'Keine passenden BePo-Zielwachen vorhanden',
           'success'
         );
-
         return;
       }
 
-      if (
-        sources.length === 0
-      ) {
+      if (!sources.length) {
         throw new Error(
-          'Kein Personal oberhalb der eingestellten Reserven.'
+          'Keine zulässigen Quellwachen mit verfügbarem Personal.'
         );
       }
 
-      let completed = 0;
-      let errors = 0;
-      let transferred = 0;
+      console.log(
+        PREFIX,
+        'Start',
+        {
+          mode: config.mode,
+          targets: targets.length,
+          targetPersonnel: config.targetPersonnel,
+          trainingCounts: config.trainingCounts,
+          sourceReserve:
+            config.mode === MODES.TRAINED
+              ? TRAINED_SOURCE_RESERVE
+              : {
+                  police: config.policeReserve,
+                  bepo: config.bepoReserve
+                }
+        }
+      );
 
-      const personnelPools =
-        new Map();
+      let completed = 0;
+      let transferred = 0;
+      let shortages = 0;
+      let errors = 0;
+
+      const allPools = new Map();
 
       for (const target of targets) {
-        if (!runIsActive()) {
-          return;
-        }
+        if (!runIsActive()) break;
 
         setProgress(
           `${completed}/${targets.length}: ${target.caption}`,
@@ -1930,40 +2442,23 @@
         );
 
         try {
-          await refreshTargetNeed(
-            target,
-            configuration
-          );
+          const result =
+            config.mode === MODES.TRAINED
+              ? await fillTargetTrained(
+                  target,
+                  sources,
+                  config,
+                  allPools
+                )
+              : await fillTargetUntrained(
+                  target,
+                  sources,
+                  config,
+                  allPools
+                );
 
-          syncSourceEntryForTarget(
-            sources,
-            target
-          );
-
-          if (
-            target.needed <= 0
-          ) {
-            completed++;
-
-            setProgress(
-              `${completed}/${targets.length} Wachen, ${transferred} Personen`,
-              completed,
-              targets.length,
-              errors
-                ? 'warning'
-                : 'success'
-            );
-
-            continue;
-          }
-
-          transferred +=
-            await fillTarget(
-              target,
-              sources,
-              configuration.requestDelay,
-              personnelPools
-            );
+          transferred += result.transferred;
+          shortages += result.missing;
 
         } catch (error) {
           errors++;
@@ -1979,18 +2474,22 @@
         completed++;
 
         setProgress(
-          `${completed}/${targets.length} Wachen, ${transferred} Personen`,
+          `${completed}/${targets.length} Wachen, ` +
+          `${transferred} Personen verschoben`,
           completed,
           targets.length,
-          errors
+          errors || shortages
             ? 'warning'
             : 'success'
         );
       }
 
       await stopRun(
-        `Fertig: ${transferred} Personen übernommen, ${errors} Fehler`,
-        errors
+        cancelRequested
+          ? `Abgebrochen: ${transferred} Personen übernommen`
+          : `Fertig: ${transferred} Personen, ` +
+            `${shortages} fehlend, ${errors} Fehler`,
+        cancelRequested || shortages || errors
           ? 'warning'
           : 'success'
       );
@@ -1998,7 +2497,7 @@
     } catch (error) {
       console.error(
         PREFIX,
-        'Lauf fehlgeschlagen:',
+        'Personalwerber fehlgeschlagen:',
         error
       );
 
@@ -2016,30 +2515,23 @@
    */
 
   function settingsButton() {
-    const button = document.createElement(
-      'a'
+    const button = el(
+      'a',
+      'btn btn-default btn-xs'
     );
-
-    button.className =
-      'btn btn-default btn-xs';
 
     button.href =
       `/settings/index#${SETTINGS_IDENTIFIER}`;
 
-    button.target =
-      '_blank';
+    button.target = '_blank';
+    button.title = 'Einstellungen';
 
-    button.title =
-      'Einstellungen';
-
-    const icon = document.createElement(
-      'span'
+    button.append(
+      el(
+        'span',
+        'glyphicon glyphicon-cog'
+      )
     );
-
-    icon.className =
-      'glyphicon glyphicon-cog';
-
-    button.append(icon);
 
     return button;
   }
@@ -2058,46 +2550,32 @@
       return;
     }
 
-    const term = document.createElement(
-      'dt'
+    const term = el('dt');
+
+    term.append(
+      el('strong', '', 'Personal werben:')
     );
 
-    const strong = document.createElement(
-      'strong'
+    const description = el('dd');
+
+    const group = el(
+      'div',
+      'btn-group'
     );
 
-    strong.textContent =
-      'Personal werben:';
+    group.id = 'nilspe-bepo-buttons';
 
-    term.append(strong);
+    const startButton = el(
+      'button',
+      'btn btn-default btn-xs',
+      'BePo-Personal werben'
+    );
 
-    const description =
-      document.createElement('dd');
-
-    const group =
-      document.createElement('div');
-
-    group.id =
-      'nilspe-bepo-buttons';
-
-    group.className =
-      'btn-group';
-
-    const startButton =
-      document.createElement('button');
-
-    startButton.type =
-      'button';
-
-    startButton.className =
-      'btn btn-default btn-xs';
-
-    startButton.textContent =
-      'BePo-Personal werben';
+    startButton.type = 'button';
 
     startButton.addEventListener(
       'click',
-      runRecruiter
+      () => void runRecruiter()
     );
 
     group.append(
@@ -2105,9 +2583,7 @@
       settingsButton()
     );
 
-    description.append(
-      group
-    );
+    description.append(group);
 
     details.append(
       term,
@@ -2117,7 +2593,7 @@
 
   /*
    * ==========================================
-   * START
+   * INITIALISIERUNG
    * ==========================================
    */
 
@@ -2130,33 +2606,25 @@
     return;
   }
 
-  const buildingType =
-    currentBuildingType();
+  const buildingType = currentBuildingType();
 
-  if (
-    ![7, 11].includes(
-      buildingType
-    )
-  ) {
+  if (![7, 11].includes(buildingType)) {
     return;
   }
 
-  window.addEventListener(
-    'pagehide',
-    () => {
-      if (
-        runIsActive()
-      ) {
-        sessionStorage.removeItem(
-          SESSION_RUN_KEY
-        );
+  window.addEventListener('pagehide', () => {
+    cancelRequested = true;
 
-        GM.deleteValue(
-          RUN_LOCK_KEY
-        );
-      }
+    if (SESSION_RUN_KEY) {
+      sessionStorage.removeItem(
+        SESSION_RUN_KEY
+      );
     }
-  );
+
+    if (RUN_LOCK_KEY && running) {
+      void GM.deleteValue(RUN_LOCK_KEY);
+    }
+  });
 
   addBuildingButtons();
 
