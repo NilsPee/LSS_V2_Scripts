@@ -1,6 +1,6 @@
 
 // ==UserScript==
-// @name         Leitstelle-Pol-Werber
+// @name         Leitstelle Pol-Werber
 // @namespace    NilsPe.police.personnel
 // @version      1.1.1
 // @description  Verteilt unausgebildetes Personal aus Polizei- und BePo-Wachen auf Polizeiwachen
