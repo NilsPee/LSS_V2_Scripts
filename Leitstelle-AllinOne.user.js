@@ -2,7 +2,7 @@
  // ==UserScript==
  // @name         LSS All in One
  // @namespace    NilsPe.lss.all.in.one
- // @version      0.5.7
+ // @version      0.5.10
  // @description  Leitstellen-Werkzeuge und Soll-Ist-Ausführungsplan mit getrennten Fortschrittsphasen
  // @author       NilsPe
  // @match        https://*.leitstellenspiel.de/*
@@ -17,7 +17,7 @@
 (async function () {
     'use strict';
 
-    const VERSION = '0.5.7';
+    const VERSION = '0.5.10';
     const PAGE_URL = '/settings/index?lss_all_in_one=1';
 
     const PAGE_SIZE = 100;
@@ -408,8 +408,10 @@
     }
 
     function extension(building, type) {
-        return building?.extensions?.find(
-            item => Number(item.type_id) === Number(type)
+        return (Array.isArray(building?.extensions)
+            ? building.extensions : []).find(
+            item => item.type_id != null &&
+                Number(item.type_id) === Number(type)
         );
     }
 
@@ -1175,12 +1177,12 @@
         );
 
         const refreshAll = button(
-            'Beide APIs aktualisieren',
+            'Gebäude komplett + Fahrzeuge aktualisieren',
             'primary'
         );
 
         const refreshBuildings = button(
-            'Gebäude-API aktualisieren'
+            'Gebäude-API vollständig aktualisieren'
         );
 
         const refreshVehicles = button(
@@ -1225,7 +1227,7 @@
         );
 
         // =================================================
-        // DREI FORTSCHRITTSBALKEN
+        // FORTSCHRITT JE TATSÄCHLICHER AKTION
         // =================================================
 
         const phaseProgress = el(
@@ -1235,18 +1237,33 @@
 
         const PHASES = [
             {
-                id: 'building',
-                title: 'Phase 1 – Gebäude und Fahrzeugkäufe',
+                id: 'level',
+                title: 'Gebäudestufen',
+                unit: 'Wachen'
+            },
+            {
+                id: 'extensions',
+                title: 'Erweiterungen',
+                unit: 'Wachen'
+            },
+            {
+                id: 'state',
+                title: 'Wachenstatus',
+                unit: 'Wachen'
+            },
+            {
+                id: 'vehicle',
+                title: 'Fahrzeuge kaufen',
                 unit: 'Wachen'
             },
             {
                 id: 'max',
-                title: 'Phase 2 – Maximalpersonal',
+                title: 'Maximalpersonal',
                 unit: 'Fahrzeuge'
             },
             {
                 id: 'crew',
-                title: 'Phase 3 – Personalzuweisung',
+                title: 'Personalzuweisung',
                 unit: 'Fahrzeuge'
             }
         ];
@@ -1307,7 +1324,9 @@
                 `0 / 0 ${config.unit}`
             );
 
-            details.append(current, count);
+            const eta = el('span', 'aio-phase-eta');
+
+            details.append(current, eta, count);
 
             card.append(
                 heading,
@@ -1317,14 +1336,17 @@
 
             return {
                 card,
+                title,
                 state,
                 fill,
                 current,
+                eta,
                 count,
                 unit: config.unit,
                 done: 0,
                 total: 0,
                 errors: 0,
+                startedAt: 0,
                 status: 'pending'
             };
         }
@@ -1335,6 +1357,22 @@
             const card = createPhaseCard(config);
             progressCards[config.id] = card;
             phaseProgress.append(card.card);
+        }
+
+        function showPhaseCards(ids) {
+            const active = new Set(ids);
+            let number = 0;
+            phaseProgress.hidden = active.size === 0;
+
+            for (const config of PHASES) {
+                const item = progressCards[config.id];
+                item.card.hidden = !active.has(config.id);
+
+                if (!item.card.hidden) {
+                    item.title.textContent =
+                        `Phase ${++number} – ${config.title}`;
+                }
+            }
         }
 
         function paintPhase(id) {
@@ -1374,6 +1412,29 @@
             item.state.textContent =
                 labels[item.status] ??
                 item.status;
+
+            if (item.status === 'running') {
+                if (item.done > 0 && item.done < item.total) {
+                    const elapsed = performance.now() - item.startedAt;
+                    const remaining = elapsed / item.done *
+                        (item.total - item.done);
+                    const seconds = Math.ceil(remaining / 1000);
+                    const hours = Math.floor(seconds / 3600);
+                    const minutes = Math.floor(seconds % 3600 / 60);
+                    const rest = seconds % 60;
+
+                    item.eta.textContent = hours
+                        ? `Rest ca. ${hours} h ${minutes} min`
+                        : minutes
+                            ? `Rest ca. ${minutes} min ${rest} s`
+                            : `Rest ca. ${rest} s`;
+                } else {
+                    item.eta.textContent = item.done
+                        ? '' : 'Restzeit wird ermittelt';
+                }
+            } else {
+                item.eta.textContent = '';
+            }
         }
 
         function resetPhases() {
@@ -1383,6 +1444,7 @@
                 item.done = 0;
                 item.total = 0;
                 item.errors = 0;
+                item.startedAt = 0;
                 item.status = 'pending';
 
                 item.current.textContent =
@@ -1398,6 +1460,7 @@
             item.done = 0;
             item.total = total;
             item.errors = 0;
+            item.startedAt = 0;
 
             item.status =
                 total === 0
@@ -1418,6 +1481,7 @@
             item.done = 0;
             item.total = total;
             item.errors = 0;
+            item.startedAt = performance.now();
 
             item.status =
                 total > 0
@@ -1492,6 +1556,7 @@
         }
 
         resetPhases();
+        showPhaseCards([]);
 
         const previewProgress = el(
             'div',
@@ -1698,6 +1763,10 @@
         function invalidate() {
             prepared = null;
             startButton.disabled = true;
+
+            if (!running) {
+                showPhaseCards([]);
+            }
         }
 
         function setBusy(value, isRun = false) {
@@ -3007,7 +3076,7 @@
 
         runPage.append(panel(
             'Ablaufsteuerung',
-            'Die Vorschau erstellt drei getrennte Arbeitslisten.'
+            'Die Vorschau zeigt nur Arbeitsschritte mit offenen Aufgaben.'
         ));
 
         const summary = el(
@@ -3140,13 +3209,7 @@
             };
         }
 
-        /*
-         * NEU v0.5.2:
-         *
-         * Die Gebäudeliste wird separat bewertet.
-         * Personal allein darf eine Wache NICHT
-         * mehr in Phase 1 aufnehmen.
-         */
+        /* Personal allein erzeugt keine Gebäude- oder Kaufphase. */
 
         function hasPhaseOneWork(job) {
             return Boolean(
@@ -3166,6 +3229,50 @@
                 job.personnel.length ||
                 job.personnelAfterPurchase.length
             );
+        }
+
+        function jobNeedsStage(job, stage) {
+            switch (stage) {
+                case 'level':
+                    return job.level != null || job.checkLevel;
+                case 'extensions':
+                    return Boolean(
+                        job.extensionsBuy.length ||
+                        job.extensionsState.length ||
+                        job.checkExtensions.length
+                    );
+                case 'state':
+                    return job.buildingEnabled != null || job.checkEnabled;
+                case 'vehicle':
+                    return job.purchases.length > 0;
+                default:
+                    return false;
+            }
+        }
+
+        const BUILDING_STAGES = [
+            'level', 'extensions', 'state', 'vehicle'
+        ];
+
+        function phaseIdsForPlan(jobs, lists) {
+            const ids = BUILDING_STAGES.filter(stage =>
+                lists.buildingJobs.some(job => jobNeedsStage(job, stage))
+            );
+            const afterPurchase = jobs.flatMap(job =>
+                job.personnelAfterPurchase
+            );
+
+            if (lists.maxTasks.length ||
+                afterPurchase.some(rule => rule.max != null)) {
+                ids.push('max');
+            }
+
+            if (lists.crewTasks.length ||
+                afterPurchase.some(rule => rule.crew != null)) {
+                ids.push('crew');
+            }
+
+            return ids;
         }
 
         function buildJob(building, template) {
@@ -3416,16 +3523,9 @@
             return job;
         }
 
-        /*
-         * Drei echte Arbeitslisten.
-         *
-         * Phase 1 = nur Gebäude-/Kaufaufträge.
-         *
-         * Phase 2/3 = konkrete Fahrzeuge.
-         *
-         * Neu gekaufte Fahrzeuge kommen nach
-         * erfolgreicher Kaufbestätigung hinzu.
-         */
+        /* Gebäude-/Kaufaufträge und konkrete Personalaufträge
+         * bleiben getrennt. Neue Fahrzeuge werden nach erfolgreicher
+         * Kaufbestätigung ergänzt. */
 
         function splitPlan(jobs) {
             const buildingJobs = jobs.filter(
@@ -3483,6 +3583,7 @@
 
                 clearLog();
                 resetPhases();
+                showPhaseCards([]);
 
                 log(
                     '--- API-v2-Abgleich vor der Vorschau ---'
@@ -3597,8 +3698,9 @@
                     );
                 }
 
-                // NEU: Phase 1 schon hier vollständig filtern.
+                // Nur Wachen mit offenen Gebäude-/Kaufaktionen vormerken.
                 const lists = splitPlan(jobs);
+                const phaseIds = phaseIdsForPlan(jobs, lists);
 
                 prepared = {
                     createdAt: Date.now(),
@@ -3606,6 +3708,7 @@
                     ids,
                     jobs,
                     skipped,
+                    phaseIds,
                     buildingJobs: lists.buildingJobs,
                     initialMaxTasks: lists.maxTasks,
                     initialCrewTasks: lists.crewTasks
@@ -3626,21 +3729,7 @@
                     `Vollständig fertig: ${fmt(skipped)}`
                 );
 
-                log(
-                    `Phase 1: ${fmt(lists.buildingJobs.length)} Wachen mit Aktionen`
-                );
-
-                log(
-                    `Phase 1 direkt übersprungen: ${fmt(phaseOneSkipped)} Wachen`
-                );
-
-                log(
-                    `Phase 2: ${fmt(lists.maxTasks.length)} vorhandene Fahrzeuge`
-                );
-
-                log(
-                    `Phase 3: ${fmt(lists.crewTasks.length)} vorhandene Fahrzeuge`
-                );
+                log(`${fmt(phaseOneSkipped)} Wachen ohne Gebäude- oder Kaufaktionen.`);
 
                 const newVehicleRules = jobs.reduce(
                     (sum, job) =>
@@ -3655,38 +3744,51 @@
                     );
                 }
 
-                previewPhase(
-                    'building',
-                    lists.buildingJobs.length,
-                    `${fmt(phaseOneSkipped)} Wachen direkt aussortiert`
-                );
+                showPhaseCards(phaseIds);
 
-                previewPhase(
-                    'max',
-                    lists.maxTasks.length,
-                    'Offene Maximalpersonal-Aufträge'
-                );
+                for (const stage of BUILDING_STAGES) {
+                    if (!phaseIds.includes(stage)) continue;
 
-                previewPhase(
-                    'crew',
-                    lists.crewTasks.length,
-                    'Offene Personalzuweisungen'
-                );
+                    const count = lists.buildingJobs.filter(job =>
+                        jobNeedsStage(job, stage)
+                    ).length;
 
-                planText.textContent =
-                    `${fmt(skipped)} Wachen vollständig fertig · ` +
-                    `${fmt(lists.buildingJobs.length)} Wachen für Phase 1 · ` +
-                    `${fmt(lists.maxTasks.length)} Max-Personal-Aufträge · ` +
-                    `${fmt(lists.crewTasks.length)} Personalaufträge`;
+                    previewPhase(stage, count, `${fmt(count)} Wachen offen`);
+                }
+
+                for (const [id, tasks] of [
+                    ['max', lists.maxTasks],
+                    ['crew', lists.crewTasks]
+                ]) {
+                    if (!phaseIds.includes(id)) continue;
+
+                    previewPhase(id, tasks.length,
+                        `${fmt(tasks.length)} Fahrzeuge offen`);
+
+                    if (!tasks.length) {
+                        progressCards[id].status = 'pending';
+                        progressCards[id].current.textContent =
+                            'Aufträge nach Fahrzeugkauf ermitteln';
+                        paintPhase(id);
+                    }
+                }
+
+                const phaseSummary = phaseIds.map(id => {
+                    const config = PHASES.find(item => item.id === id);
+                    const count = progressCards[id].total;
+                    return `${config.title}: ${fmt(count)}`;
+                });
+
+                planText.textContent = phaseSummary.length
+                    ? `${fmt(skipped)} Wachen vollständig fertig · ` +
+                        phaseSummary.join(' · ')
+                    : 'Alle ausgewählten Wachen sind bereits fertig.';
 
                 setStatus(
                     'Arbeitsplan bereit'
                 );
 
-                log(
-                    'Arbeitslisten erstellt. Phase 1 enthält ' +
-                    'keine reinen Personalaufträge mehr.'
-                );
+                log(`${phaseIds.length} benötigte Arbeitsphasen erstellt.`);
 
             } catch (error) {
                 log(
@@ -3722,12 +3824,12 @@
             await sleep(ACTION_DELAY);
         }
 
-        async function runBuildingJob(job, ledger) {
+        async function runBuildingJob(job, ledger, stage) {
             check();
 
             const id = job.id;
 
-            if (job.level != null) {
+            if (stage === 'level' && job.level != null) {
                 let level =
                     job.checkLevel
                         ? await liveLevel(id)
@@ -3762,6 +3864,16 @@
                 }
             }
 
+            if (stage === 'extensions') {
+            // Der Sammel-Cache wird inkrementell aktualisiert. Gerade
+            // gekaufte Erweiterungen deshalb vor dem Kauf am einzelnen
+            // Gebäude live prüfen.
+            const liveBefore = await liveBuilding(id);
+
+            if (!Array.isArray(liveBefore.extensions)) {
+                throw new Error('Live-Erweiterungsbestand unbekannt.');
+            }
+
             const buyRules = [
                 ...job.extensionsBuy
             ];
@@ -3771,20 +3883,12 @@
             ];
 
             if (job.checkExtensions.length) {
-                const live = await liveBuilding(id);
-
-                if (!Array.isArray(live.extensions)) {
-                    throw new Error(
-                        'Erweiterungsbestand unbekannt.'
-                    );
-                }
-
                 for (
                     const rule
                     of job.checkExtensions
                 ) {
                     const existing = extension(
-                        live,
+                        liveBefore,
                         rule.type
                     );
 
@@ -3804,12 +3908,36 @@
             for (const rule of buyRules) {
                 check();
 
+                if (extension(liveBefore, rule.type)) {
+                    log(`  ${rule.name}: bereits vorhanden (Live-API)`);
+                    continue;
+                }
+
                 const offers = await extensionOffers(id);
                 const url = offers.get(rule.type);
 
                 if (!url) {
+                    // Zwischen Vorschau und Durchlauf kann die Erweiterung
+                    // auch auf anderem Weg gekauft worden sein.
+                    const current = await liveBuilding(id);
+
+                    if (extension(current, rule.type)) {
+                        log(`  ${rule.name}: inzwischen vorhanden`);
+                        continue;
+                    }
+
+                    const liveTypes = Array.isArray(current.extensions)
+                        ? current.extensions
+                            .map(item => item.type_id)
+                            .filter(value => value != null)
+                            .slice(0, 25)
+                            .join(', ')
+                        : 'unbekannt';
+
                     throw new Error(
-                        `${rule.name}: derzeit nicht kaufbar.`
+                        `${rule.name} (Typ-ID ${rule.type}): weder im ` +
+                        'Live-Bestand noch als Kaufangebot gefunden. ' +
+                        `Live-IDs: ${liveTypes || 'keine'}`
                     );
                 }
 
@@ -3884,7 +4012,9 @@
                 );
             }
 
-            if (job.buildingEnabled != null) {
+            }
+
+            if (stage === 'state' && job.buildingEnabled != null) {
                 let needsChange = true;
 
                 if (job.checkEnabled) {
@@ -3923,6 +4053,7 @@
                 }
             }
 
+            if (stage === 'vehicle') {
             for (const purchase of job.purchases) {
                 check();
 
@@ -3992,6 +4123,7 @@
                     );
                 }
             }
+            }
         }
 
         // =================================================
@@ -4054,15 +4186,9 @@
             const tasks = [];
 
             for (const job of snapshot.jobs) {
-                /*
-                 * NEU v0.5.2:
-                 *
-                 * Eine Wache ohne Phase-1-Auftrag gilt
-                 * für die Personalplanung als freigegeben.
-                 *
-                 * Genau dadurch überspringen wir Phase 1,
-                 * ohne reine Personalaufträge zu verlieren.
-                 */
+                /* Reine Personalaufträge benötigen keine Gebäude- oder
+                 * Kaufphase. Fehlerhafte Gebäudeaktionen sperren hingegen
+                 * die abhängigen Personalaufträge dieser Wache. */
 
                 const phaseOneOkay =
                     !job.hasPhaseOne ||
@@ -4071,7 +4197,7 @@
                 if (!phaseOneOkay) {
                     log(
                         `Personal übersprungen: ${buildingLabel(job.id)} · ` +
-                        'Phase 1 nicht erfolgreich.'
+                        'Gebäude- oder Kaufaktion nicht erfolgreich.'
                     );
 
                     continue;
@@ -4184,7 +4310,7 @@
 
             if (!maxTasks.length) {
                 log(
-                    'Phase 2: Keine Maximalpersonal-Änderungen erforderlich.'
+                    'Keine Maximalpersonal-Änderungen erforderlich.'
                 );
 
                 finishPhase('max');
@@ -4192,7 +4318,7 @@
             }
 
             log(
-                `\n--- Phase 2: Maximalpersonal (${maxTasks.length} Fahrzeuge) ---`
+                `\n--- Maximalpersonal (${maxTasks.length} Fahrzeuge) ---`
             );
 
             let done = 0;
@@ -4306,7 +4432,7 @@
 
             if (!crewTasks.length) {
                 log(
-                    'Phase 3: Keine Personalzuweisungen erforderlich.'
+                    'Keine Personalzuweisungen erforderlich.'
                 );
 
                 finishPhase('crew');
@@ -4314,7 +4440,7 @@
             }
 
             log(
-                `\n--- Phase 3: Personalzuweisung (${crewTasks.length} Fahrzeuge) ---`
+                `\n--- Personalzuweisung (${crewTasks.length} Fahrzeuge) ---`
             );
 
             let done = 0;
@@ -4416,20 +4542,30 @@
                     'Keine Änderungen nötig'
                 );
 
-                for (const config of PHASES) {
-                    beginPhase(config.id, 0);
-                    finishPhase(config.id);
-                }
+                showPhaseCards([]);
 
                 return;
             }
 
+            const selectedPhases = snapshot.phaseIds.map((id, index) => {
+                const config = PHASES.find(item => item.id === id);
+                const count = BUILDING_STAGES.includes(id)
+                    ? snapshot.buildingJobs.filter(job =>
+                        jobNeedsStage(job, id)).length
+                    : id === 'max'
+                        ? snapshot.initialMaxTasks.length
+                        : snapshot.initialCrewTasks.length;
+
+                return `Phase ${index + 1}: ${config.title} – ` +
+                    `${count} ${config.unit}`;
+            });
+
             if (!window.confirm(
                 `${snapshot.jobs.length} Wachen mit offenen Aufgaben.\n\n` +
-                `Phase 1: ${snapshot.buildingJobs.length} Wachen\n` +
-                `Phase 2: ${snapshot.initialMaxTasks.length} vorhandene Fahrzeuge\n` +
-                `Phase 3: ${snapshot.initialCrewTasks.length} vorhandene Fahrzeuge\n\n` +
-                'Neue Fahrzeuge können nach dem Kauf dazukommen.\n\n' +
+                selectedPhases.join('\n') + '\n\n' +
+                (snapshot.phaseIds.includes('vehicle')
+                    ? 'Neue Fahrzeuge können nach dem Kauf dazukommen.\n\n'
+                    : '') +
                 'Jetzt starten?'
             )) {
                 return;
@@ -4442,12 +4578,12 @@
             showTab('run');
 
             resetPhases();
+            showPhaseCards(snapshot.phaseIds);
 
             const ledger = new Map();
             const phaseOneSuccessful = new Set();
 
             let failed = 0;
-            let processed = 0;
             let verificationFailed = false;
             let runStarted = false;
 
@@ -4472,108 +4608,67 @@
 
                         runStarted = true;
 
-                        // =================================
-                        // PHASE 1: NUR OFFENE GEBÄUDEAKTIONEN
-                        // =================================
+                        // Nur die tatsächlich benötigten Gebäude- und
+                        // Kaufphasen ausführen, in bisheriger Reihenfolge.
+                        const failedBuildings = new Set();
 
-                        const buildingJobs =
-                            snapshot.buildingJobs;
+                        for (const stage of BUILDING_STAGES) {
+                            if (!snapshot.phaseIds.includes(stage)) continue;
 
-                        beginPhase(
-                            'building',
-                            buildingJobs.length
-                        );
-
-                        const skippedBuildings =
-                            snapshot.ids.length -
-                            buildingJobs.length;
-
-                        log(
-                            `\nPhase 1: ${fmt(skippedBuildings)} Wachen ` +
-                            'direkt aussortiert.'
-                        );
-
-                        if (!buildingJobs.length) {
-                            /*
-                             * NEU v0.5.2:
-                             *
-                             * Kein einziger Gebäudedurchlauf.
-                             * Keine Gebäudeseiten abrufen.
-                             * Keine Wartezeit zwischen Wachen.
-                             * Sofort 100 % anzeigen.
-                             */
-
-                            log(
-                                'Phase 1: Keine Änderungen erforderlich.'
+                            const config = PHASES.find(item => item.id === stage);
+                            const stageJobs = snapshot.buildingJobs.filter(
+                                job => jobNeedsStage(job, stage)
                             );
+                            let processed = 0;
 
-                            finishPhase('building');
-                        } else {
-                            for (const job of buildingJobs) {
+                            beginPhase(stage, stageJobs.length);
+                            log(`\n--- ${config.title}: ${stageJobs.length} Wachen ---`);
+
+                            for (const job of stageJobs) {
                                 if (cancelled) break;
 
-                                const detail =
-                                    buildingLabel(job.id);
-
-                                setPhase(
-                                    `Gebäude/Fahrzeuge: ` +
-                                    `${processed + 1}/${buildingJobs.length}`
-                                );
-
-                                progressCards.building.current.textContent =
-                                    detail;
-
-                                paintPhase('building');
-
-                                log(
-                                    `\n--- ${detail} ---`
-                                );
-
+                                const detail = buildingLabel(job.id);
                                 let error = false;
 
-                                try {
-                                    await runBuildingJob(
-                                        job,
-                                        ledger
-                                    );
-
-                                    phaseOneSuccessful.add(
-                                        job.id
-                                    );
-
-                                    log(
-                                        '  Phase 1 abgeschlossen'
-                                    );
-                                } catch (exception) {
-                                    failed++;
+                                if (failedBuildings.has(job.id)) {
+                                    log(`Übersprungen ${detail}: vorheriger Schritt fehlgeschlagen.`);
                                     error = true;
-
-                                    log(
-                                        `FEHLER ${detail}: ` +
-                                        exception.message
+                                } else {
+                                    setPhase(
+                                        `${config.title}: ` +
+                                        `${processed + 1}/${stageJobs.length} · ` +
+                                        detail
                                     );
+                                    progressCards[stage].current.textContent = detail;
+                                    paintPhase(stage);
+
+                                    log(`\n--- ${detail} ---`);
+
+                                    try {
+                                        await runBuildingJob(job, ledger, stage);
+                                    } catch (exception) {
+                                        failed++;
+                                        error = true;
+                                        failedBuildings.add(job.id);
+                                        log(`FEHLER ${detail}: ${exception.message}`);
+                                    }
                                 }
 
                                 processed++;
-
-                                updatePhase(
-                                    'building',
-                                    processed,
-                                    detail,
-                                    error
-                                );
-
-                                await sleep(
-                                    BUILDING_DELAY
-                                );
-
+                                updatePhase(stage, processed, detail, error);
+                                await sleep(BUILDING_DELAY);
                                 await yieldUI();
                             }
 
-                            finishPhase(
-                                'building',
-                                cancelled
-                            );
+                            finishPhase(stage, cancelled);
+
+                            if (cancelled) break;
+                        }
+
+                        for (const job of snapshot.buildingJobs) {
+                            if (!failedBuildings.has(job.id)) {
+                                phaseOneSuccessful.add(job.id);
+                            }
                         }
 
                         // =================================
@@ -4628,21 +4723,21 @@
                             '\n--- Personalplanung ---'
                         );
 
-                        log(
-                            `Phase 2: ${fmt(maxCount)} Fahrzeuge`
-                        );
+                        if (snapshot.phaseIds.includes('max')) {
+                            log(`Maximalpersonal: ${fmt(maxCount)} Fahrzeuge`);
+                        }
 
-                        log(
-                            `Phase 3: ${fmt(crewCount)} Fahrzeuge`
-                        );
+                        if (snapshot.phaseIds.includes('crew')) {
+                            log(`Personalzuweisung: ${fmt(crewCount)} Fahrzeuge`);
+                        }
 
                         // =================================
                         // PHASE 2
                         // =================================
 
-                        failed += await runMaxPhase(
-                            tasks
-                        );
+                        if (snapshot.phaseIds.includes('max')) {
+                            failed += await runMaxPhase(tasks);
+                        }
 
                         if (cancelled) {
                             return;
@@ -4652,9 +4747,9 @@
                         // PHASE 3
                         // =================================
 
-                        failed += await runCrewPhase(
-                            tasks
-                        );
+                        if (snapshot.phaseIds.includes('crew')) {
+                            failed += await runCrewPhase(tasks);
+                        }
                     }
                 );
 
@@ -4670,36 +4765,15 @@
                     `Ausgewählte Wachen: ${fmt(snapshot.ids.length)}`
                 );
 
-                log(
-                    `Phase 1 direkt aussortiert: ${fmt(
-                        snapshot.ids.length -
-                        snapshot.buildingJobs.length
-                    )}`
-                );
+                for (const [index, id] of snapshot.phaseIds.entries()) {
+                    const config = PHASES.find(item => item.id === id);
+                    const item = progressCards[id];
 
-                log(
-                    `Phase 1 bearbeitet: ${fmt(
-                        progressCards.building.done
-                    )} / ${fmt(
-                        progressCards.building.total
-                    )}`
-                );
-
-                log(
-                    `Phase 2 bearbeitet: ${fmt(
-                        progressCards.max.done
-                    )} / ${fmt(
-                        progressCards.max.total
-                    )}`
-                );
-
-                log(
-                    `Phase 3 bearbeitet: ${fmt(
-                        progressCards.crew.done
-                    )} / ${fmt(
-                        progressCards.crew.total
-                    )}`
-                );
+                    log(
+                        `Phase ${index + 1} ${config.title}: ` +
+                        `${fmt(item.done)} / ${fmt(item.total)} ${config.unit}`
+                    );
+                }
 
                 const purchases = [
                     ...ledger.values()
@@ -4869,6 +4943,15 @@
         toolsDeactivateRun.disabled = true;
         toolsDeleteRun.disabled = true;
 
+        const toolTitles = {
+            move: 'Wachen verschieben',
+            rename: 'Wachen umbenennen',
+            staff: 'Wachenpersonal setzen',
+            activate: 'Wachen aktivieren',
+            deactivate: 'Wachen deaktivieren',
+            delete: 'Wachen löschen'
+        };
+
         function selectedToolBuildings() {
             return [...selectedBuildings]
                 .map(id => buildingById.get(Number(id)))
@@ -5019,7 +5102,9 @@
                         `\n… und ${plan.length - 100} weitere Wachen`;
                 }
 
-                toolsStatus.textContent = `${fmt(plan.length)} Änderungen in der Vorschau.`;
+                toolsStatus.textContent =
+                    `${toolTitles[kind]}: ${fmt(plan.length)} Änderungen ` +
+                    'in der Vorschau.';
 
                 if (!plan.length) {
                     return;
@@ -5230,7 +5315,8 @@
                     }
 
                     toolsStatus.textContent =
-                        `${kind}: ${done + failed}/${plan.length} · ` +
+                        `${toolTitles[kind]}: ` +
+                        `${done + failed}/${plan.length} · ` +
                         `${done} erfolgreich · ${failed} Fehler`;
                     toolsProgressFill.style.width =
                         `${Math.round((done + failed) / plan.length * 100)}%`;
@@ -6894,6 +6980,19 @@
                     mode === 'all' ||
                     mode === 'buildings'
                 ) {
+                    // maxAge=0 allein startet in der Skriptbasis nur einen
+                    // inkrementellen Abruf. Ein manueller Abgleich soll auch
+                    // bereits gekaufte, dabei übersehene Erweiterungen neu
+                    // aus dem vollständigen Gebäudebestand lesen.
+                    const state = await getSyncState(db, 'buildings');
+                    await writeSyncState(db, 'buildings', {
+                        ...state,
+                        inProgress: false,
+                        resumeUrl: null,
+                        complete: false,
+                        checkedAt: 0,
+                        fullSyncAt: 0
+                    });
                     await loadBuildings(true);
 
                     drawCenters();
@@ -7255,13 +7354,7 @@
                 `${fmt(centers.length)} Leitstellen verfügbar.`
             );
 
-            log(
-                `v${VERSION}: Drei getrennte Arbeitslisten aktiviert.`
-            );
-
-            log(
-                'Phase 1 enthält nur offene Gebäude- und Kaufaktionen.'
-            );
+            log(`v${VERSION}: Dynamische Arbeitsphasen aktiviert.`);
 
             log(
                 'Leere Phasen springen sofort auf 100 %.'
@@ -7708,6 +7801,11 @@
                 margin: 18px 0;
             }
 
+            #nilspe-all-in-one .aio-phase-progress[hidden],
+            #nilspe-all-in-one .aio-phase-card[hidden] {
+                display: none;
+            }
+
             #nilspe-all-in-one .aio-phase-card {
                 border: 1px solid #8885;
                 background: #8881;
@@ -7793,6 +7891,13 @@
 
             #nilspe-all-in-one .aio-phase-count {
                 flex-shrink: 0;
+                font-variant-numeric: tabular-nums;
+            }
+
+            #nilspe-all-in-one .aio-phase-eta {
+                flex-shrink: 0;
+                margin-left: auto;
+                opacity: .8;
                 font-variant-numeric: tabular-nums;
             }
 
