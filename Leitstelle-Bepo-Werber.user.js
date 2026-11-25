@@ -1,6 +1,6 @@
 
 // ==UserScript==
-// @name         Leitstelle-Bepo-Werber
+// @name         Leitstelle Bepo-Werber
 // @namespace    NilsPe.bepo.personnel
 // @version      1.3.1
 // @description  BePo-Personalwerber mit getrennten Modi für unausgebildetes und ausgebildetes Personal
